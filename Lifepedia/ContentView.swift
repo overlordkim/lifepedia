@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  treatwistrash
+//  Lifepedia
 //
 //  Created by kashorin on 2026/4/7.
 //

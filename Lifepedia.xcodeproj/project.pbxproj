@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		69C4737C2F8541AC0018E5F5 /* treatwistrash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = treatwistrash.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		69C4737C2F8541AC0018E5F5 /* Lifepedia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Lifepedia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		69C4737E2F8541AC0018E5F5 /* treatwistrash */ = {
+		69C4737E2F8541AC0018E5F5 /* Lifepedia */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = treatwistrash;
+			path = Lifepedia;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		69C473732F8541AC0018E5F5 = {
 			isa = PBXGroup;
 			children = (
-				69C4737E2F8541AC0018E5F5 /* treatwistrash */,
+				69C4737E2F8541AC0018E5F5 /* Lifepedia */,
 				69C4737D2F8541AC0018E5F5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		69C4737D2F8541AC0018E5F5 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				69C4737C2F8541AC0018E5F5 /* treatwistrash.app */,
+				69C4737C2F8541AC0018E5F5 /* Lifepedia.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		69C4737B2F8541AC0018E5F5 /* treatwistrash */ = {
+		69C4737B2F8541AC0018E5F5 /* Lifepedia */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 69C473872F8541AC0018E5F5 /* Build configuration list for PBXNativeTarget "treatwistrash" */;
+			buildConfigurationList = 69C473872F8541AC0018E5F5 /* Build configuration list for PBXNativeTarget "Lifepedia" */;
 			buildPhases = (
 				69C473782F8541AC0018E5F5 /* Sources */,
 				69C473792F8541AC0018E5F5 /* Frameworks */,
@@ -61,13 +61,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				69C4737E2F8541AC0018E5F5 /* treatwistrash */,
+				69C4737E2F8541AC0018E5F5 /* Lifepedia */,
 			);
-			name = treatwistrash;
+			name = Lifepedia;
 			packageProductDependencies = (
 			);
-			productName = treatwistrash;
-			productReference = 69C4737C2F8541AC0018E5F5 /* treatwistrash.app */;
+			productName = Lifepedia;
+			productReference = 69C4737C2F8541AC0018E5F5 /* Lifepedia.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 69C473772F8541AC0018E5F5 /* Build configuration list for PBXProject "treatwistrash" */;
+			buildConfigurationList = 69C473772F8541AC0018E5F5 /* Build configuration list for PBXProject "Lifepedia" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				69C4737B2F8541AC0018E5F5 /* treatwistrash */,
+				69C4737B2F8541AC0018E5F5 /* Lifepedia */,
 			);
 		};
 /* End PBXProject section */
@@ -266,7 +266,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cashdiffusion.treatwistrash;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cashdiffusion.lifepedia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -298,7 +298,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.cashdiffusion.treatwistrash;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cashdiffusion.lifepedia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -313,7 +313,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		69C473772F8541AC0018E5F5 /* Build configuration list for PBXProject "treatwistrash" */ = {
+		69C473772F8541AC0018E5F5 /* Build configuration list for PBXProject "Lifepedia" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				69C473852F8541AC0018E5F5 /* Debug */,
@@ -322,7 +322,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		69C473872F8541AC0018E5F5 /* Build configuration list for PBXNativeTarget "treatwistrash" */ = {
+		69C473872F8541AC0018E5F5 /* Build configuration list for PBXNativeTarget "Lifepedia" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				69C473882F8541AC0018E5F5 /* Debug */,

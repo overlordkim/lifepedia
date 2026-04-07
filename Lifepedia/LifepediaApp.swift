@@ -1,6 +1,6 @@
 //
-//  treatwistrashApp.swift
-//  treatwistrash
+//  LifepediaApp.swift
+//  Lifepedia
 //
 //  Created by kashorin on 2026/4/7.
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct treatwistrashApp: App {
+struct LifepediaApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
