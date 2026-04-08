@@ -153,6 +153,11 @@ struct EntryPageView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
+        .overlay {
+            if showLinkInput {
+                linkInputOverlay
+            }
+        }
     }
 
     // MARK: - 自定义顶栏
@@ -1056,6 +1061,75 @@ struct EntryPageView: View {
         }
     }
 
+    private var linkInputOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation { showLinkInput = false }
+                    linkInputText = ""
+                }
+
+            VStack(spacing: 16) {
+                HStack {
+                    Image(systemName: "link")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.wikiBlue)
+                    Text("粘贴链接")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.wikiText)
+                }
+
+                TextField("https://...", text: $linkInputText)
+                    .font(.system(size: 15))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.wikiBgSecondary)
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation { showLinkInput = false }
+                        linkInputText = ""
+                    } label: {
+                        Text("取消")
+                            .font(.system(size: 15))
+                            .foregroundColor(.wikiSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.wikiBgSecondary))
+                    }
+
+                    Button {
+                        let url = linkInputText.trimmingCharacters(in: .whitespaces)
+                        if !url.isEmpty {
+                            attachments.append(AttachmentItem(type: .link, name: url, linkURL: url))
+                        }
+                        linkInputText = ""
+                        withAnimation { showLinkInput = false }
+                    } label: {
+                        Text("添加")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.wikiBlue))
+                    }
+                }
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.wikiBg)
+            )
+            .padding(.horizontal, 32)
+        }
+    }
+
     @State private var showLinkInput = false
     @State private var linkInputText = ""
 
@@ -1066,24 +1140,13 @@ struct EntryPageView: View {
                     Label("从相册选图", systemImage: "photo.on.rectangle")
                 }
                 Button {
-                    showLinkInput = true
+                    showAttachmentSheet = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        withAnimation(.spring(response: 0.3)) { showLinkInput = true }
+                    }
                 } label: {
                     Label("粘贴链接", systemImage: "link")
                 }
-            }
-            .alert("粘贴链接", isPresented: $showLinkInput) {
-                TextField("https://...", text: $linkInputText)
-                Button("取消", role: .cancel) { linkInputText = "" }
-                Button("添加") {
-                    let url = linkInputText.trimmingCharacters(in: .whitespaces)
-                    if !url.isEmpty {
-                        attachments.append(AttachmentItem(type: .link, name: url, linkURL: url))
-                    }
-                    linkInputText = ""
-                    showAttachmentSheet = false
-                }
-            } message: {
-                Text("输入要添加的网页链接")
             }
             .listStyle(.insetGrouped)
             .navigationTitle("添加内容")
@@ -1146,9 +1209,11 @@ struct EntryPageView: View {
         guard !text.isEmpty else { return }
 
         let imageData = attachments.compactMap(\.imageBase64)
+        let linkURLs = attachments.compactMap(\.linkURL)
         let hasImages = !imageData.isEmpty
-        print("🔴🔴🔴 sendMessage called: text=\(text.prefix(30)), hasImages=\(hasImages), imageCount=\(imageData.count), b64Lengths=\(imageData.map(\.count))")
-        let displayText = hasImages ? "📷×\(imageData.count) \(text)" : text
+        var displayText = text
+        if hasImages { displayText = "📷×\(imageData.count) \(displayText)" }
+        if !linkURLs.isEmpty { displayText += "\n" + linkURLs.map { "🔗 \($0)" }.joined(separator: "\n") }
         messages.append(ChatMessage(role: .user, content: displayText))
         inputText = ""
         attachments = []
@@ -1174,7 +1239,6 @@ struct EntryPageView: View {
 
                 let snapshot = entry.map { EntrySnapshot(from: $0) }
                 let editable = entry?.canEdit ?? false
-                // 优先用 URL（AI 既能看图又能拿到链接），上传失败时才 fallback base64
                 let useBase64Fallback = hasImages && uploadedURLs.isEmpty
                 let result = try await AIService.shared.chat(
                     messages: messages,

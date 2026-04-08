@@ -204,6 +204,11 @@ struct ComposeEntryWrapper: View {
                 exitConfirmationOverlay
             }
         }
+        .overlay {
+            if showComposeLinkInput {
+                linkInputOverlay
+            }
+        }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -377,7 +382,25 @@ struct ComposeEntryWrapper: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                // 有内容时显示标题 + 简介
+                // 封面图
+                let coverURL: String? = entry.coverImageURL
+                    ?? entry.sections.first(where: { !$0.imageRefs.isEmpty })?.imageRefs.first
+                if let urlStr = coverURL, let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else if phase.error != nil {
+                            EmptyView()
+                        } else {
+                            Rectangle().fill(Color.wikiBgSecondary)
+                                .overlay(ProgressView())
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(16.0/9, contentMode: .fit)
+                    .clipped()
+                }
+
                 Text(entry.title)
                     .font(.wikiTitle)
                     .foregroundColor(.wikiText)
@@ -399,6 +422,27 @@ struct ComposeEntryWrapper: View {
                         Text(section.body)
                             .font(.wikiBody)
                             .foregroundColor(.wikiText)
+
+                        ForEach(section.imageRefs, id: \.self) { urlStr in
+                            if let url = URL(string: urlStr) {
+                                AsyncImage(url: url) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().scaledToFit()
+                                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                            .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                                    } else if phase.error != nil {
+                                        EmptyView()
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.wikiBgSecondary)
+                                            .frame(height: 200)
+                                            .overlay(ProgressView())
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 4)
+                            }
+                        }
                     }
                     .padding(.horizontal, 16)
                 }
@@ -464,11 +508,6 @@ struct ComposeEntryWrapper: View {
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showAttachmentSheet)
-        .overlay {
-            if showComposeLinkInput {
-                linkInputOverlay
-            }
-        }
         .onChange(of: selectedPhotos) {
             let items = selectedPhotos
             selectedPhotos = []
@@ -546,9 +585,14 @@ struct ComposeEntryWrapper: View {
                 }
 
             VStack(spacing: 16) {
-                Text("粘贴链接")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.wikiText)
+                HStack {
+                    Image(systemName: "link")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.wikiBlue)
+                    Text("粘贴链接")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.wikiText)
+                }
 
                 TextField("https://...", text: $composeLinkText)
                     .font(.system(size: 15))
@@ -598,8 +642,6 @@ struct ComposeEntryWrapper: View {
             )
             .padding(.horizontal, 32)
         }
-        .transition(.opacity)
-        .animation(.spring(response: 0.3), value: showComposeLinkInput)
     }
 
     private var composeAttachmentBar: some View {
@@ -633,8 +675,11 @@ struct ComposeEntryWrapper: View {
         guard !text.isEmpty else { return }
 
         let imageData = attachments.compactMap(\.imageBase64)
+        let linkURLs = attachments.compactMap(\.linkURL)
         let hasImages = !imageData.isEmpty
-        let displayText = hasImages ? "📷×\(imageData.count) \(text)" : text
+        var displayText = text
+        if hasImages { displayText = "📷×\(imageData.count) \(displayText)" }
+        if !linkURLs.isEmpty { displayText += "\n" + linkURLs.map { "🔗 \($0)" }.joined(separator: "\n") }
         messages.append(ChatMessage(role: .user, content: displayText))
         inputText = ""
         attachments.removeAll()
@@ -643,11 +688,26 @@ struct ComposeEntryWrapper: View {
 
         Task {
             do {
+                var uploadedURLs: [String] = []
+                if hasImages {
+                    for (idx, b64) in imageData.enumerated() {
+                        do {
+                            let url = try await SupabaseService.shared.uploadBase64Image(b64)
+                            uploadedURLs.append(url)
+                            print("[Upload] 图片\(idx+1) 上传成功: \(url)")
+                        } catch {
+                            print("[Upload] 图片\(idx+1) 上传失败: \(error)")
+                        }
+                    }
+                }
+
                 let snapshot = entry.title.isEmpty ? nil : EntrySnapshot(from: entry)
+                let useBase64Fallback = hasImages && uploadedURLs.isEmpty
                 let result = try await AIService.shared.chat(
                     messages: messages,
                     currentEntry: snapshot,
-                    imageBase64List: hasImages ? imageData : nil
+                    imageBase64List: useBase64Fallback ? imageData : nil,
+                    uploadedImageURLs: uploadedURLs.isEmpty ? nil : uploadedURLs
                 )
 
                 await MainActor.run {
@@ -692,6 +752,61 @@ struct ComposeEntryWrapper: View {
                                 relatedEntryId: entry.id
                             ))
                         }
+                    }
+                }
+
+                if !result.imageGenTasks.isEmpty {
+                    await MainActor.run {
+                        withAnimation { aiStatus = .generatingImage }
+                        messages.append(ChatMessage(role: .system, content: "photo.artframe|正在生成 \(result.imageGenTasks.count) 张插图…"))
+                    }
+
+                    for task in result.imageGenTasks {
+                        do {
+                            let tempURL = try await ImageGenerationService.shared.generate(
+                                prompt: task.prompt,
+                                sectionTitle: task.sectionTitle
+                            )
+                            let persistedURL: String
+                            do {
+                                persistedURL = try await SupabaseService.shared.persistImageFromURL(tempURL)
+                            } catch {
+                                persistedURL = tempURL
+                            }
+
+                            await MainActor.run {
+                                if let idx = entry.sections.firstIndex(where: { $0.title == task.sectionTitle }) {
+                                    var refs = entry.sections[idx].imageRefs
+                                    refs.append(persistedURL)
+                                    entry.sections[idx] = EntrySection(
+                                        title: entry.sections[idx].title,
+                                        body: entry.sections[idx].body,
+                                        imageRefs: refs
+                                    )
+                                } else if !entry.sections.isEmpty {
+                                    var refs = entry.sections[0].imageRefs
+                                    refs.append(persistedURL)
+                                    entry.sections[0] = EntrySection(
+                                        title: entry.sections[0].title,
+                                        body: entry.sections[0].body,
+                                        imageRefs: refs
+                                    )
+                                }
+                                if entry.coverImageURL == nil || entry.coverImageURL?.isEmpty == true {
+                                    entry.coverImageURL = persistedURL
+                                }
+                                try? modelContext.save()
+                                messages.append(ChatMessage(role: .system, content: "checkmark.circle|「\(task.sectionTitle)」插图已生成"))
+                            }
+                        } catch {
+                            await MainActor.run {
+                                messages.append(ChatMessage(role: .system, content: "exclamationmark.triangle|插图生成失败: \(error.localizedDescription)"))
+                            }
+                        }
+                    }
+
+                    await MainActor.run {
+                        withAnimation { aiStatus = nil }
                     }
                 }
             } catch {

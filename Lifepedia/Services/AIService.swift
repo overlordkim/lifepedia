@@ -653,7 +653,7 @@ final class AIService: @unchecked Sendable {
             imagePromptsBySection: imagePromptsBySection
         )
 
-        print("[AIService] update_entry 解析成功: title=\(title ?? "nil"), sections=\(sections.count), infobox=\(fields.count), related=\(relatedTitles?.count ?? 0)")
+        print("[AIService] update_entry 解析成功: title=\(title ?? "nil"), sections=\(sections.count)")
         return (reply, data)
     }
 
@@ -667,20 +667,41 @@ final class AIService: @unchecked Sendable {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    // MARK: - Fetch URL Content (外部工具)
+    // MARK: - Fetch URL Content (Spider API via Edge Function)
 
     private func fetchURLContent(_ urlString: String) async -> String {
-        guard let url = URL(string: urlString) else { return "无效的 URL" }
+        let endpoint = "\(Secrets.supabaseURL)/functions/v1/crawl-url"
+        guard let reqURL = URL(string: endpoint) else { return "无效的服务端点" }
+
+        var request = URLRequest(url: reqURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(Secrets.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 30
+
+        let body: [String: Any] = ["url": urlString]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
         do {
-            let (data, _) = try await session.data(from: url)
-            let text = String(data: data, encoding: .utf8) ?? ""
-            // 粗略提取文本，去掉 HTML 标签
-            let cleaned = text
-                .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            let truncated = String(cleaned.prefix(3000))
-            return truncated.isEmpty ? "页面内容为空" : truncated
+            let (data, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            guard 200..<300 ~= status else {
+                let errStr = String(data: data, encoding: .utf8) ?? ""
+                print("[CrawlURL] 失败 status=\(status): \(errStr.prefix(200))")
+                return "获取失败 (HTTP \(status))"
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let content = json["content"] as? String else {
+                return "页面内容解析失败"
+            }
+
+            print("[CrawlURL] 成功: \(urlString), 内容长度=\(content.count)")
+            return content.isEmpty ? "页面内容为空" : content
         } catch {
+            print("[CrawlURL] 错误: \(error)")
             return "获取失败: \(error.localizedDescription)"
         }
     }
@@ -768,7 +789,7 @@ struct AIEntryData {
 
         entry.updatedAt = .now
 
-        print("[AIEntryData] apply 完成: entry.title=\(entry.title), entry.sections=\(entry.sections.count), revisions=\(entry.revisions.count)")
+        print("[AIEntryData] apply 完成: entry.title=\(entry.title), entry.sections=\(entry.sections.count)")
     }
 }
 
