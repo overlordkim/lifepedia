@@ -7,6 +7,7 @@ enum AIStatus: Equatable {
     case updatingEntry(String)
     case fetchingURL
     case analyzing
+    case generatingImage
 
     var label: String {
         switch self {
@@ -14,15 +15,17 @@ enum AIStatus: Equatable {
         case .updatingEntry(let t): return t.isEmpty ? "正在编纂词条" : "正在编纂「\(t)」"
         case .fetchingURL:          return "正在获取链接"
         case .analyzing:            return "正在分析"
+        case .generatingImage:      return "正在生成插图"
         }
     }
 
     var icon: String {
         switch self {
-        case .thinking:       return "sparkles"
-        case .updatingEntry:  return "pencil.line"
-        case .fetchingURL:    return "link"
-        case .analyzing:      return "eye"
+        case .thinking:         return "sparkles"
+        case .updatingEntry:    return "pencil.line"
+        case .fetchingURL:      return "link"
+        case .analyzing:        return "eye"
+        case .generatingImage:  return "photo.artframe"
         }
     }
 }

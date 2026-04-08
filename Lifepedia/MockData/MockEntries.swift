@@ -16,14 +16,21 @@ enum MockEntries {
             makeXiaoming(),
             makeMilkTeaShop(),
             makeCollegeYears(),
-            // 其他用户
-            makeYudongGrandma(),
-            makeLinqingTeapot(),
-            makeXiaoyuDaju(),
-        ]
+        ] + otherUserEntries()
         for entry in entries {
             context.insert(entry)
         }
+    }
+
+    /// 仅补种其他用户的词条
+    static func seedOtherUsers(in context: ModelContext) {
+        for entry in otherUserEntries() {
+            context.insert(entry)
+        }
+    }
+
+    private static func otherUserEntries() -> [Entry] {
+        [makeYudongGrandma(), makeLinqingTeapot(), makeXiaoyuDaju()]
     }
 
     // MARK: - Helpers

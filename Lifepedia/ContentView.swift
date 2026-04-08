@@ -18,6 +18,7 @@ struct ContentView: View {
                 switch selectedTab {
                 case .feed:
                     FeedView(hideTabBar: $hideTabBar, onNavigateToMyPage: {
+                        hideTabBar = false
                         selectedTab = .myPage
                     })
                 case .myPage:
@@ -36,7 +37,9 @@ struct ContentView: View {
             NavigationStack {
                 ComposeEntryWrapper(
                     entry: entry,
-                    onDismiss: { cleanupAndDismiss(entry) }
+                    onPublish: { publishAndDismiss(entry) },
+                    onSaveDraft: { saveDraftAndDismiss(entry) },
+                    onDiscard: { discardAndDismiss(entry) }
                 )
             }
         }
@@ -117,22 +120,32 @@ struct ContentView: View {
         composeEntry = entry
     }
 
-    private func cleanupAndDismiss(_ entry: Entry) {
-        if entry.title.isEmpty && entry.sections.isEmpty && (entry.introductionText ?? "").isEmpty {
-            modelContext.delete(entry)
-            try? modelContext.save()
-        } else {
-            // 有内容 → 自动发布并推送 Supabase
-            if entry.status == .draft {
-                entry.status = .published
-                entry.publishedAt = .now
-                entry.updatedAt = .now
-                try? modelContext.save()
-            }
-            Task {
-                try? await SupabaseService.shared.upsertEntry(entry)
-            }
-        }
+    private func publishAndDismiss(_ entry: Entry) {
+        entry.status = .published
+        entry.publishedAt = .now
+        entry.updatedAt = .now
+        entry.draft = nil
+        try? modelContext.save()
+        Task { try? await SupabaseService.shared.upsertEntry(entry) }
+        composeEntry = nil
+    }
+
+    private func saveDraftAndDismiss(_ entry: Entry) {
+        entry.status = .draft
+        entry.draft = EntryDraft(
+            title: entry.title,
+            category: entry.category,
+            introduction: entry.introductionText,
+            lastEditedAt: .now
+        )
+        entry.updatedAt = .now
+        try? modelContext.save()
+        composeEntry = nil
+    }
+
+    private func discardAndDismiss(_ entry: Entry) {
+        modelContext.delete(entry)
+        try? modelContext.save()
         composeEntry = nil
     }
 }
@@ -141,8 +154,12 @@ struct ContentView: View {
 
 struct ComposeEntryWrapper: View {
     @Bindable var entry: Entry
-    let onDismiss: () -> Void
+    let onPublish: () -> Void
+    let onSaveDraft: () -> Void
+    let onDiscard: () -> Void
     @Environment(\.modelContext) private var modelContext
+    @AppStorage("user_display_name") private var displayName = "我"
+    @AppStorage("user_avatar_seed") private var avatarSeed = 32
 
     @State private var showChat = false
     @State private var messages: [ChatMessage] = []
@@ -151,6 +168,7 @@ struct ComposeEntryWrapper: View {
     @State private var showAttachmentSheet = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var attachments: [AttachmentItem] = []
+    @State private var showExitConfirmation = false
 
     var body: some View {
         GeometryReader { geo in
@@ -181,6 +199,11 @@ struct ComposeEntryWrapper: View {
         .background(Color.wikiBg)
         .navigationBarHidden(true)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showChat)
+        .overlay {
+            if showExitConfirmation {
+                exitConfirmationOverlay
+            }
+        }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -193,16 +216,28 @@ struct ComposeEntryWrapper: View {
 
     // MARK: - 顶栏
 
+    private var hasContent: Bool {
+        !entry.title.isEmpty || !entry.sections.isEmpty || !(entry.introductionText ?? "").isEmpty
+    }
+
     private var composeTopBar: some View {
         HStack(spacing: 12) {
-            Button { onDismiss() } label: {
+            Button {
+                if hasContent {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        showExitConfirmation = true
+                    }
+                } else {
+                    onDiscard()
+                }
+            } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.wikiText)
                     .frame(width: 28, height: 28)
             }
 
-            AsyncImage(url: URL(string: "https://i.pravatar.cc/80?img=32")) { phase in
+            AsyncImage(url: URL(string: "https://i.pravatar.cc/80?img=\(avatarSeed)")) { phase in
                 if let image = phase.image {
                     image.resizable().scaledToFill()
                 } else {
@@ -212,7 +247,7 @@ struct ComposeEntryWrapper: View {
             .frame(width: 28, height: 28)
             .clipShape(Circle())
 
-            Text("我")
+            Text(displayName)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.wikiText)
 
@@ -228,6 +263,17 @@ struct ComposeEntryWrapper: View {
                     .foregroundColor(.wikiText)
                     .contentTransition(.symbolEffect(.replace))
             }
+
+            if hasContent {
+                Button { onPublish() } label: {
+                    Text("发布")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.wikiBlue))
+                }
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 48)
@@ -238,6 +284,74 @@ struct ComposeEntryWrapper: View {
                 .foregroundColor(.wikiDivider),
             alignment: .bottom
         )
+    }
+
+    // MARK: - 退出确认浮层
+
+    private var exitConfirmationOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.25)) { showExitConfirmation = false }
+                }
+
+            VStack(spacing: 0) {
+                Text("保存词条？")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.wikiText)
+                    .padding(.top, 20)
+                    .padding(.bottom, 16)
+
+                exitDialogButton(title: "发布", icon: "arrow.up.circle.fill", color: .wikiBlue) {
+                    withAnimation { showExitConfirmation = false }
+                    onPublish()
+                }
+                exitDialogButton(title: "存为草稿", icon: "doc.text", color: .wikiSecondary) {
+                    withAnimation { showExitConfirmation = false }
+                    onSaveDraft()
+                }
+                exitDialogButton(title: "丢弃", icon: "trash", color: .red) {
+                    withAnimation { showExitConfirmation = false }
+                    onDiscard()
+                }
+
+                Button {
+                    withAnimation(.spring(response: 0.25)) { showExitConfirmation = false }
+                } label: {
+                    Text("取消")
+                        .font(.system(size: 15))
+                        .foregroundColor(.wikiTertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.wikiBg)
+            )
+            .padding(.horizontal, 40)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showExitConfirmation)
+    }
+
+    private func exitDialogButton(title: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundColor(color)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(title == "丢弃" ? .red : .wikiText)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 13)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 预览区
@@ -343,49 +457,149 @@ struct ComposeEntryWrapper: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
         .background(Color.wikiBg)
-        .sheet(isPresented: $showAttachmentSheet) {
-            composeAttachmentSheet.presentationDetents([.medium])
-        }
-    }
-
-    private var composeAttachmentSheet: some View {
-        NavigationStack {
-            List {
-                PhotosPicker(selection: $selectedPhotos, maxSelectionCount: 5, matching: .images) {
-                    Label("从相册选图", systemImage: "photo.on.rectangle")
-                }
-                Button { showAttachmentSheet = false } label: {
-                    Label("拍照", systemImage: "camera")
-                }
-                Button { showAttachmentSheet = false } label: {
-                    Label("选择文件", systemImage: "doc")
-                }
-                Button {
-                    attachments.append(AttachmentItem(type: .link, name: "已粘贴链接"))
-                    showAttachmentSheet = false
-                } label: {
-                    Label("粘贴链接", systemImage: "link")
-                }
-                Button { showAttachmentSheet = false } label: {
-                    Label("录音", systemImage: "mic")
-                }
+        .overlay(alignment: .bottom) {
+            if showAttachmentSheet {
+                composeAttachmentOverlay
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("添加内容")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { showAttachmentSheet = false }.font(.wikiButton)
-                }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showAttachmentSheet)
+        .overlay {
+            if showComposeLinkInput {
+                linkInputOverlay
             }
         }
         .onChange(of: selectedPhotos) {
-            for item in selectedPhotos {
-                attachments.append(AttachmentItem(type: .image, name: item.itemIdentifier ?? "图片"))
-            }
+            let items = selectedPhotos
             selectedPhotos = []
             showAttachmentSheet = false
+            Task {
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data),
+                       let jpeg = uiImage.jpegData(compressionQuality: 0.6) {
+                        let b64 = jpeg.base64EncodedString()
+                        await MainActor.run {
+                            attachments.append(AttachmentItem(type: .image, name: "图片", imageBase64: b64))
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    @State private var showComposeLinkInput = false
+    @State private var composeLinkText = ""
+
+    private var composeAttachmentOverlay: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                PhotosPicker(selection: $selectedPhotos, maxSelectionCount: 5, matching: .images) {
+                    VStack(spacing: 6) {
+                        Image(systemName: "photo.on.rectangle")
+                            .font(.system(size: 22))
+                            .foregroundColor(.wikiBlue)
+                        Text("相册")
+                            .font(.system(size: 11))
+                            .foregroundColor(.wikiSecondary)
+                    }
+                    .frame(width: 72, height: 64)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.wikiBgSecondary))
+                }
+
+                Button {
+                    showComposeLinkInput = true
+                    showAttachmentSheet = false
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: "link")
+                            .font(.system(size: 22))
+                            .foregroundColor(.wikiBlue)
+                        Text("链接")
+                            .font(.system(size: 11))
+                            .foregroundColor(.wikiSecondary)
+                    }
+                    .frame(width: 72, height: 64)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.wikiBgSecondary))
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.wikiBg)
+                .shadow(color: .black.opacity(0.08), radius: 12, y: -4)
+        )
+        .padding(.bottom, 56)
+    }
+
+    private var linkInputOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation { showComposeLinkInput = false }
+                    composeLinkText = ""
+                }
+
+            VStack(spacing: 16) {
+                Text("粘贴链接")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.wikiText)
+
+                TextField("https://...", text: $composeLinkText)
+                    .font(.system(size: 15))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.wikiBgSecondary)
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation { showComposeLinkInput = false }
+                        composeLinkText = ""
+                    } label: {
+                        Text("取消")
+                            .font(.system(size: 15))
+                            .foregroundColor(.wikiSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.wikiBgSecondary))
+                    }
+
+                    Button {
+                        let url = composeLinkText.trimmingCharacters(in: .whitespaces)
+                        if !url.isEmpty {
+                            attachments.append(AttachmentItem(type: .link, name: url, linkURL: url))
+                        }
+                        composeLinkText = ""
+                        withAnimation { showComposeLinkInput = false }
+                    } label: {
+                        Text("添加")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.wikiBlue))
+                    }
+                }
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.wikiBg)
+            )
+            .padding(.horizontal, 32)
+        }
+        .transition(.opacity)
+        .animation(.spring(response: 0.3), value: showComposeLinkInput)
     }
 
     private var composeAttachmentBar: some View {
@@ -417,7 +631,11 @@ struct ComposeEntryWrapper: View {
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
-        messages.append(ChatMessage(role: .user, content: text))
+
+        let imageData = attachments.compactMap(\.imageBase64)
+        let hasImages = !imageData.isEmpty
+        let displayText = hasImages ? "📷×\(imageData.count) \(text)" : text
+        messages.append(ChatMessage(role: .user, content: displayText))
         inputText = ""
         attachments.removeAll()
 
@@ -428,7 +646,8 @@ struct ComposeEntryWrapper: View {
                 let snapshot = entry.title.isEmpty ? nil : EntrySnapshot(from: entry)
                 let result = try await AIService.shared.chat(
                     messages: messages,
-                    currentEntry: snapshot
+                    currentEntry: snapshot,
+                    imageBase64List: hasImages ? imageData : nil
                 )
 
                 await MainActor.run {
@@ -464,6 +683,15 @@ struct ComposeEntryWrapper: View {
                             }
                         }
                         try? modelContext.save()
+
+                        if !entry.title.isEmpty {
+                            NotificationService.shared.add(AppNotification(
+                                type: .aiUpdate,
+                                title: "词条编纂完成",
+                                body: "AI 助手完成了「\(entry.title)」的更新",
+                                relatedEntryId: entry.id
+                            ))
+                        }
                     }
                 }
             } catch {

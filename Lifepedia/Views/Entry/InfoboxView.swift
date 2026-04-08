@@ -6,47 +6,53 @@ struct InfoboxView: View {
 
     var body: some View {
         if infobox.fields.isEmpty { EmptyView() } else {
-            VStack(spacing: 0) {
-                // 标题行
-                Text("\(category.label)信息")
-                    .font(.wikiInfoboxKey)
-                    .foregroundColor(.wikiText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.wikiBgSecondary)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.wikiBlue)
+                    Text(category.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.wikiText)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
-                Divider().foregroundColor(.wikiDivider)
-
-                // 字段
                 ForEach(Array(infobox.fields.enumerated()), id: \.element.id) { idx, field in
                     HStack(alignment: .top, spacing: 0) {
                         Text(field.key)
-                            .font(.wikiInfoboxKey)
-                            .foregroundColor(.wikiSecondary)
-                            .frame(width: 90, alignment: .leading)
-                            .padding(.vertical, 8)
-                            .padding(.leading, 12)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.wikiTertiary)
+                            .frame(width: 80, alignment: .trailing)
+                            .padding(.trailing, 12)
 
                         Text(field.value)
-                            .font(.wikiInfoboxValue)
+                            .font(.system(size: 13))
                             .foregroundColor(.wikiText)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                            .padding(.trailing, 12)
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
 
                     if idx < infobox.fields.count - 1 {
-                        Divider()
-                            .foregroundColor(.wikiDivider)
-                            .padding(.horizontal, 12)
+                        Rectangle()
+                            .fill(Color.wikiDivider.opacity(0.5))
+                            .frame(height: 0.5)
+                            .padding(.leading, 106)
+                            .padding(.trailing, 14)
                     }
                 }
+
+                Spacer().frame(height: 10)
             }
-            .background(Color.wikiBgSecondary)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(hex: 0xFAFAFA))
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.wikiBorder, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color(hex: 0xEEEEEE), lineWidth: 0.5)
             )
         }
     }

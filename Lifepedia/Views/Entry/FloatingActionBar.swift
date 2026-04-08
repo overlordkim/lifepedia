@@ -16,6 +16,16 @@ struct FloatingActionBar: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
                             isLiked.toggle()
                         }
+                        if isLiked && entry.authorId != "self" {
+                            let myName = UserDefaults.standard.string(forKey: "user_display_name") ?? "我"
+                            NotificationService.shared.add(AppNotification(
+                                type: .like,
+                                title: "\(myName) 赞了词条",
+                                body: "「\(entry.title)」",
+                                relatedEntryId: entry.id,
+                                fromUserName: myName
+                            ))
+                        }
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: isLiked ? "heart.fill" : "heart")
@@ -39,7 +49,14 @@ struct FloatingActionBar: View {
                         }
                     }
 
-                    Button { } label: {
+                    Button {
+                        let text = "来看看「\(entry.title)」这篇词条 — 人间词条 Lifepedia"
+                        let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let root = scene.windows.first?.rootViewController {
+                            root.present(av, animated: true)
+                        }
+                    } label: {
                         Image(systemName: "paperplane")
                             .font(.system(size: 22, weight: .light))
                             .foregroundColor(.wikiText)

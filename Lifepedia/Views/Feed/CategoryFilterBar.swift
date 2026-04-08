@@ -26,10 +26,10 @@ struct CategoryFilterBar: View {
             Text(label)
                 .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                 .foregroundColor(isSelected ? .white : .wikiSecondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
                 .background(
-                    Capsule()
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(isSelected ? Color.wikiText : Color(hex: 0xF0F0F0))
                 )
         }

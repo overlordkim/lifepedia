@@ -151,14 +151,18 @@ struct Comment: Codable, Identifiable, Hashable {
     var body: String
     var createdAt: Date
     var likeCount: Int
+    var parentId: String?
+    var replyToName: String?
 
-    init(id: String = UUID().uuidString, authorName: String = "我", authorAvatar: String? = nil, body: String, createdAt: Date = .now, likeCount: Int = 0) {
+    init(id: String = UUID().uuidString, authorName: String = "我", authorAvatar: String? = nil, body: String, createdAt: Date = .now, likeCount: Int = 0, parentId: String? = nil, replyToName: String? = nil) {
         self.id = id
         self.authorName = authorName
         self.authorAvatar = authorAvatar
         self.body = body
         self.createdAt = createdAt
         self.likeCount = likeCount
+        self.parentId = parentId
+        self.replyToName = replyToName
     }
 }
 
@@ -374,9 +378,13 @@ final class Entry {
     var isDraft: Bool { status == .draft }
     var hasPendingDraft: Bool { status == .published && draft != nil }
 
-    /// 用户是否有编辑权限（简化判断）
     var canEdit: Bool {
-        authorId == "self" || scope == .collaborative
+        if authorId == "self" { return true }
+        let contributors = contributorNames ?? []
+        if scope == .collaborative && (contributors.contains("我") || contributors.contains(UserDefaults.standard.string(forKey: "user_display_name") ?? "我")) {
+            return true
+        }
+        return false
     }
 
     /// 从正文中提取 [[蓝色链接]]
@@ -409,5 +417,59 @@ final class Entry {
             }
         }
         return Array(Set(links))
+    }
+}
+
+// MARK: - 用户导航目标
+
+struct UserDestination: Hashable {
+    let userName: String
+    let userId: String
+}
+
+// MARK: - 通知
+
+enum NotificationType: String, Codable {
+    case comment    = "comment"
+    case like       = "like"
+    case follow     = "follow"
+    case coEdit     = "coEdit"
+    case aiUpdate   = "aiUpdate"
+    case collabInvite = "collabInvite"
+    case collabRequest = "collabRequest"
+
+    var icon: String {
+        switch self {
+        case .comment:        return "text.bubble.fill"
+        case .like:           return "heart.fill"
+        case .follow:         return "person.fill.badge.plus"
+        case .coEdit:         return "person.2.fill"
+        case .aiUpdate:       return "sparkles"
+        case .collabInvite:   return "envelope.fill"
+        case .collabRequest:  return "hand.raised.fill"
+        }
+    }
+
+}
+
+struct AppNotification: Identifiable, Codable {
+    var id: String
+    var type: NotificationType
+    var title: String
+    var body: String
+    var relatedEntryId: UUID?
+    var fromUserName: String?
+    var isRead: Bool
+    var createdAt: Date
+
+    init(id: String = UUID().uuidString, type: NotificationType, title: String, body: String, relatedEntryId: UUID? = nil, fromUserName: String? = nil, isRead: Bool = false, createdAt: Date = .now) {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.body = body
+        self.relatedEntryId = relatedEntryId
+        self.fromUserName = fromUserName
+        self.isRead = isRead
+        self.createdAt = createdAt
     }
 }

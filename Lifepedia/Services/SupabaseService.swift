@@ -29,6 +29,7 @@ final class SupabaseService: @unchecked Sendable {
     }()
 
     private var restURL: String { "\(Secrets.supabaseURL)/rest/v1" }
+    private var storageURL: String { "\(Secrets.supabaseURL)/storage/v1" }
 
     private var headers: [String: String] {
         [
@@ -81,6 +82,66 @@ final class SupabaseService: @unchecked Sendable {
         let (_, _) = try await session.data(for: request)
     }
 
+    // MARK: - Storage 图片上传
+
+    /// 将图片 Data 上传到 Supabase Storage，返回公开访问 URL
+    func uploadImage(_ data: Data, fileName: String? = nil) async throws -> String {
+        let name = fileName ?? "\(UUID().uuidString).jpg"
+        let path = "entries/\(name)"
+        let endpoint = "\(storageURL)/object/images/\(path)"
+        print("[Storage] 上传开始: \(endpoint), dataSize=\(data.count)")
+
+        guard let uploadURL = URL(string: endpoint) else {
+            throw SupabaseError.requestFailed("Invalid storage URL: \(endpoint)")
+        }
+
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "POST"
+        request.setValue(Secrets.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("true", forHTTPHeaderField: "x-upsert")
+        request.timeoutInterval = 60
+        request.httpBody = data
+
+        let (respData, response) = try await session.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let respStr = String(data: respData, encoding: .utf8) ?? ""
+        print("[Storage] 响应 status=\(statusCode): \(respStr.prefix(300))")
+
+        guard 200..<300 ~= statusCode else {
+            throw SupabaseError.requestFailed("Storage \(statusCode): \(respStr)")
+        }
+
+        let publicURL = "\(Secrets.supabaseURL)/storage/v1/object/public/images/\(path)"
+        print("[Storage] 上传成功: \(publicURL)")
+        return publicURL
+    }
+
+    /// 从 URL 下载图片，再上传到 Storage，返回永久公开 URL
+    func persistImageFromURL(_ urlString: String) async throws -> String {
+        guard let url = URL(string: urlString) else { throw SupabaseError.requestFailed("Invalid URL") }
+        let (data, _) = try await session.data(from: url)
+        return try await uploadImage(data)
+    }
+
+    /// 将 base64 图片上传到 Storage，返回永久公开 URL
+    func uploadBase64Image(_ base64: String) async throws -> String {
+        // 去掉可能的 data URI 前缀
+        let cleanBase64: String
+        if let range = base64.range(of: ";base64,") {
+            cleanBase64 = String(base64[range.upperBound...])
+        } else {
+            cleanBase64 = base64
+        }
+        guard let data = Data(base64Encoded: cleanBase64) else {
+            print("[Storage] base64 解码失败, 长度=\(base64.count), 前20字符=\(base64.prefix(20))")
+            throw SupabaseError.requestFailed("Invalid base64 data (length=\(base64.count))")
+        }
+        print("[Storage] base64 解码成功, imageData=\(data.count) bytes")
+        return try await uploadImage(data)
+    }
+
     // MARK: - 同步：把远程数据合并到本地 SwiftData
 
     func syncToLocal(remoteEntries: [SupabaseEntry], localEntries: [Entry], insert: (Entry) -> Void) {
@@ -131,6 +192,7 @@ struct SupabaseEntry: Codable {
     struct SupabaseSection: Codable {
         var title: String
         var body: String
+        var imageRefs: [String]?
     }
 
     /// SwiftData Entry → DTO
@@ -142,7 +204,7 @@ struct SupabaseEntry: Codable {
         self.scope = entry.scopeRaw
         self.infobox = entry.infobox.fields.map { SupabaseInfoboxField(key: $0.key, value: $0.value) }
         self.introduction = entry.introductionText
-        self.sections = entry.sections.map { SupabaseSection(title: $0.title, body: $0.body) }
+        self.sections = entry.sections.map { SupabaseSection(title: $0.title, body: $0.body, imageRefs: $0.imageRefs.isEmpty ? nil : $0.imageRefs) }
         self.tags = entry.tags
         self.coverImageUrl = entry.coverImageURL
         self.authorName = entry.authorName
@@ -168,7 +230,7 @@ struct SupabaseEntry: Codable {
             scope: EntryScope(rawValue: scope) ?? .private,
             infobox: InfoboxData(fields: (infobox ?? []).map { InfoboxField(key: $0.key, value: $0.value) }),
             introduction: introduction,
-            sections: (sections ?? []).map { EntrySection(title: $0.title, body: $0.body) },
+            sections: (sections ?? []).map { EntrySection(title: $0.title, body: $0.body, imageRefs: $0.imageRefs ?? []) },
             tags: tags ?? [],
             coverImageURL: coverImageUrl,
             authorName: authorName,
@@ -194,7 +256,7 @@ struct SupabaseEntry: Codable {
             entry.scopeRaw = scope
             entry.infobox = InfoboxData(fields: (infobox ?? []).map { InfoboxField(key: $0.key, value: $0.value) })
             entry.introductionText = introduction
-            entry.sections = (sections ?? []).map { EntrySection(title: $0.title, body: $0.body) }
+            entry.sections = (sections ?? []).map { EntrySection(title: $0.title, body: $0.body, imageRefs: $0.imageRefs ?? []) }
             entry.tags = tags
             entry.coverImageURL = coverImageUrl
             entry.authorName = authorName

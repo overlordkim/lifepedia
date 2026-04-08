@@ -39,8 +39,17 @@ struct LifepediaApp: App {
     private func seedIfNeeded() {
         let context = container.mainContext
         let count = (try? context.fetchCount(FetchDescriptor<Entry>())) ?? 0
-        guard count == 0 else { return }
-        MockEntries.seedAll(in: context)
-        try? context.save()
+        if count == 0 {
+            MockEntries.seedAll(in: context)
+            try? context.save()
+            return
+        }
+        // 补种其他用户的词条（可能旧版本没有）
+        let otherUserPred = #Predicate<Entry> { $0.authorId != "self" }
+        let otherCount = (try? context.fetchCount(FetchDescriptor<Entry>(predicate: otherUserPred))) ?? 0
+        if otherCount == 0 {
+            MockEntries.seedOtherUsers(in: context)
+            try? context.save()
+        }
     }
 }

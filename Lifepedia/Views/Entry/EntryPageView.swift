@@ -28,7 +28,10 @@ struct EntryPageView: View {
     @State private var showCollaboratorsSheet = false
     @State private var newDiscussionText = ""
     @State private var scrollToDiscussion = false
-    @State private var showAuthorProfile = false
+    @State private var targetUser: UserDestination?
+    @State private var showUserProfile = false
+    @State private var replyTarget: Comment?
+    @State private var hasRequestedCollab = false
     @FocusState private var discussionFocused: Bool
 
     private var entry: Entry? {
@@ -134,13 +137,10 @@ struct EntryPageView: View {
                 moreMenuOverlay(entry)
             }
         }
-        .navigationDestination(isPresented: $showAuthorProfile) {
-            if let entry = entry {
-                UserProfileView(
-                    userName: entry.authorName,
-                    userId: entry.authorId
-                )
-                .navigationBarHidden(true)
+        .navigationDestination(isPresented: $showUserProfile) {
+            if let user = targetUser {
+                UserProfileView(userName: user.userName, userId: user.userId)
+                    .navigationBarHidden(true)
             }
         }
         .sheet(isPresented: $showVisibilitySheet) {
@@ -180,7 +180,8 @@ struct EntryPageView: View {
                         dismiss()
                     }
                 } else {
-                    showAuthorProfile = true
+                    targetUser = UserDestination(userName: entry.authorName, userId: entry.authorId)
+                    showUserProfile = true
                 }
             } label: {
                 HStack(spacing: 8) {
@@ -209,6 +210,28 @@ struct EntryPageView: View {
 
             Spacer()
 
+            if entry.isDraft {
+                Text("草稿")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.orange.opacity(0.12)))
+
+                Button {
+                    entry.status = .published
+                    entry.updatedAt = .now
+                    try? modelContext.save()
+                } label: {
+                    Text("发布")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.wikiBlue))
+                }
+            }
+
             Button {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     showChat.toggle()
@@ -220,14 +243,16 @@ struct EntryPageView: View {
                     .contentTransition(.symbolEffect(.replace))
             }
 
-            Button {
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                    showMoreMenu.toggle()
+            if !entry.isDraft {
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        showMoreMenu.toggle()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.wikiText)
                 }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.wikiText)
             }
         }
         .padding(.horizontal, 16)
@@ -254,45 +279,24 @@ struct EntryPageView: View {
 
             // 菜单卡片
             VStack(alignment: .leading, spacing: 0) {
-                // 可见性
-                moreMenuItem(icon: entry.scope.icon, title: "可见性", subtitle: entry.scope.label) {
-                    closeMenuThen { showVisibilitySheet = true }
-                }
-
-                if entry.scope == .collaborative || entry.scope == .public {
-                    moreMenuItem(icon: "person.2", title: "合编者", subtitle: "\(entry.contributorNames?.count ?? 0) 人") {
-                        closeMenuThen { showCollaboratorsSheet = true }
-                    }
-                }
-
-                menuDivider
-
-                moreMenuItem(icon: "bubble.left.and.text.bubble.right", title: "讨论", subtitle: "\(entry.commentCount)") {
-                    closeMenuThen { scrollToDiscussion = true }
-                }
-
-                moreMenuItem(icon: "clock.arrow.circlepath", title: "修订历史") {
-                    closeMenuThen { }
-                }
-
-                menuDivider
-
-                moreMenuItem(icon: "link", title: "复制链接") {
-                    UIPasteboard.general.string = "lifepedia://entry/\(entry.id.uuidString)"
-                    closeMenuThen { }
-                }
-
-                moreMenuItem(icon: "square.and.arrow.up", title: "分享") {
-                    closeMenuThen { }
-                }
-
-                if entry.authorId != "self" {
-                    moreMenuItem(icon: "flag", title: "举报") {
-                        closeMenuThen { }
-                    }
-                }
-
                 if entry.canEdit {
+                    moreMenuItem(icon: entry.scope.icon, title: "可见性", subtitle: entry.scope.label) {
+                        closeMenuThen { showVisibilitySheet = true }
+                    }
+
+                    if entry.scope == .collaborative || entry.scope == .public {
+                        moreMenuItem(icon: "person.2", title: "合编者", subtitle: "\(entry.contributorNames?.count ?? 0) 人") {
+                            closeMenuThen { showCollaboratorsSheet = true }
+                        }
+                    }
+
+                    if entry.authorId != "self" {
+                        menuDivider
+                        moreMenuItem(icon: "rectangle.portrait.and.arrow.right", title: "退出合编", isDestructive: true) {
+                            closeMenuThen { leaveCollaboration(entry) }
+                        }
+                    }
+
                     menuDivider
                     moreMenuItem(icon: "trash", title: "删除", isDestructive: true) {
                         closeMenuThen {
@@ -301,6 +305,21 @@ struct EntryPageView: View {
                             try? modelContext.save()
                             Task { try? await SupabaseService.shared.deleteEntry(id: id) }
                             if let goHome = onDismissToFeed { goHome() } else { dismiss() }
+                        }
+                    }
+                } else {
+                    if (entry.scope == .collaborative || entry.scope == .public) {
+                        moreMenuItem(icon: "person.2", title: "合编者", subtitle: "\(entry.contributorNames?.count ?? 0) 人") {
+                            closeMenuThen { showCollaboratorsSheet = true }
+                        }
+                        menuDivider
+                    }
+
+                    if entry.scope == .public {
+                        moreMenuItem(icon: "person.badge.plus", title: hasRequestedCollab ? "已申请合编" : "申请成为合编者") {
+                            closeMenuThen {
+                                if !hasRequestedCollab { requestCollaboration(entry) }
+                            }
                         }
                     }
                 }
@@ -413,13 +432,14 @@ struct EntryPageView: View {
     // MARK: - 内联讨论区（小红书风格）
 
     private func inlineDiscussion(_ entry: Entry) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 分隔线
+        let topLevel = entry.comments.filter { $0.parentId == nil }
+        let repliesMap = Dictionary(grouping: entry.comments.filter { $0.parentId != nil }, by: { $0.parentId! })
+
+        return VStack(alignment: .leading, spacing: 0) {
             Rectangle()
                 .fill(Color.wikiBgSecondary)
                 .frame(height: 8)
 
-            // 标题栏
             HStack(spacing: 8) {
                 Image(systemName: "text.bubble")
                     .font(.system(size: 14, weight: .medium))
@@ -436,7 +456,6 @@ struct EntryPageView: View {
             .padding(.vertical, 14)
             .id("discussion-header")
 
-            // 评论列表
             if entry.comments.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "bubble.left.and.text.bubble.right")
@@ -449,12 +468,16 @@ struct EntryPageView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 32)
             } else {
-                ForEach(entry.comments) { comment in
+                ForEach(topLevel) { comment in
                     discussionRow(comment, entry: entry)
+                    if let replies = repliesMap[comment.id] {
+                        ForEach(replies) { reply in
+                            discussionReplyRow(reply, entry: entry)
+                        }
+                    }
                 }
             }
 
-            // 输入区
             discussionInput(entry)
                 .id("discussion-input")
 
@@ -465,26 +488,38 @@ struct EntryPageView: View {
     private func discussionRow(_ comment: Comment, entry: Entry) -> some View {
         HStack(alignment: .top, spacing: 10) {
             let seed = abs(comment.authorName.hashValue) % 200
-            AsyncImage(url: URL(string: "https://i.pravatar.cc/64?img=\(seed)")) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    Circle().fill(Color.wikiBgSecondary)
-                        .overlay(
-                            Text(String(comment.authorName.prefix(1)))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.wikiSecondary)
-                        )
+
+            Button {
+                navigateToCommentAuthor(comment.authorName)
+            } label: {
+                AsyncImage(url: URL(string: "https://i.pravatar.cc/64?img=\(seed)")) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Circle().fill(Color.wikiBgSecondary)
+                            .overlay(
+                                Text(String(comment.authorName.prefix(1)))
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.wikiSecondary)
+                            )
+                    }
                 }
+                .frame(width: 30, height: 30)
+                .clipShape(Circle())
             }
-            .frame(width: 30, height: 30)
-            .clipShape(Circle())
+            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(comment.authorName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.wikiSecondary)
+                    Button {
+                        navigateToCommentAuthor(comment.authorName)
+                    } label: {
+                        Text(comment.authorName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.wikiSecondary)
+                    }
+                    .buttonStyle(.plain)
+
                     if comment.authorName == entry.authorName {
                         Text("作者")
                             .font(.system(size: 10, weight: .medium))
@@ -505,7 +540,10 @@ struct EntryPageView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.wikiTertiary)
 
-                    Button {} label: {
+                    Button {
+                        replyTarget = comment
+                        discussionFocused = true
+                    } label: {
                         Text("回复")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.wikiTertiary)
@@ -535,55 +573,189 @@ struct EntryPageView: View {
         .padding(.vertical, 8)
     }
 
-    private func discussionInput(_ entry: Entry) -> some View {
-        HStack(spacing: 10) {
-            // 当前用户头像
-            Circle()
-                .fill(Color.wikiBlue.opacity(0.12))
-                .frame(width: 30, height: 30)
-                .overlay(
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.wikiBlue)
-                )
-
-            TextField("说点什么…", text: $newDiscussionText, axis: .vertical)
-                .font(.system(size: 14))
-                .lineLimit(1...3)
-                .focused($discussionFocused)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color.wikiBgSecondary)
-                )
-
-            if !newDiscussionText.trimmingCharacters(in: .whitespaces).isEmpty {
-                Button {
-                    postDiscussionComment(to: entry)
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundColor(.wikiBlue)
+    private func discussionReplyRow(_ reply: Comment, entry: Entry) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            let seed = abs(reply.authorName.hashValue) % 200
+            Button {
+                navigateToCommentAuthor(reply.authorName)
+            } label: {
+                AsyncImage(url: URL(string: "https://i.pravatar.cc/48?img=\(seed)")) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Circle().fill(Color.wikiBgSecondary)
+                            .overlay(
+                                Text(String(reply.authorName.prefix(1)))
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(.wikiSecondary)
+                            )
+                    }
                 }
-                .transition(.scale.combined(with: .opacity))
+                .frame(width: 24, height: 24)
+                .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(reply.authorName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.wikiSecondary)
+                    if reply.authorName == entry.authorName {
+                        Text("作者")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.wikiBlue)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.wikiBlue.opacity(0.1)))
+                    }
+                }
+
+                HStack(spacing: 0) {
+                    if let replyTo = reply.replyToName {
+                        Text("回复 ")
+                            .font(.system(size: 13))
+                            .foregroundColor(.wikiTertiary)
+                        Text("@\(replyTo) ")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.wikiBlue)
+                    }
+                    Text(reply.body)
+                        .font(.system(size: 13))
+                        .foregroundColor(.wikiText)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 14) {
+                    Text(discussionRelativeTime(reply.createdAt))
+                        .font(.system(size: 10))
+                        .foregroundColor(.wikiTertiary)
+                    Button {
+                        replyTarget = reply
+                        discussionFocused = true
+                    } label: {
+                        Text("回复")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.wikiTertiary)
+                    }
+                    Spacer()
+                    Button {
+                        toggleDiscussionLike(reply, entry: entry)
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: reply.likeCount > 0 ? "heart.fill" : "heart")
+                                .font(.system(size: 10))
+                                .foregroundColor(reply.likeCount > 0 ? .red.opacity(0.7) : .wikiTertiary)
+                            if reply.likeCount > 0 {
+                                Text("\(reply.likeCount)")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.wikiTertiary)
+                            }
+                        }
+                    }
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.leading, 56)
+        .padding(.trailing, 16)
+        .padding(.vertical, 6)
+    }
+
+    private func discussionInput(_ entry: Entry) -> some View {
+        VStack(spacing: 0) {
+            if let target = replyTarget {
+                HStack(spacing: 6) {
+                    Text("回复 @\(target.authorName)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.wikiSecondary)
+                    Spacer()
+                    Button {
+                        withAnimation { replyTarget = nil }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.wikiTertiary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(Color.wikiBgSecondary)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.wikiBlue.opacity(0.12))
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.wikiBlue)
+                    )
+
+                TextField(replyTarget != nil ? "回复 @\(replyTarget!.authorName)…" : "说点什么…", text: $newDiscussionText, axis: .vertical)
+                    .font(.system(size: 14))
+                    .lineLimit(1...3)
+                    .focused($discussionFocused)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.wikiBgSecondary)
+                    )
+
+                if !newDiscussionText.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Button {
+                        postDiscussionComment(to: entry)
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundColor(.wikiBlue)
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
         .animation(.spring(response: 0.25), value: newDiscussionText.isEmpty)
+        .animation(.spring(response: 0.25), value: replyTarget?.id)
     }
 
     private func postDiscussionComment(to entry: Entry) {
         let text = newDiscussionText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
-        let comment = Comment(body: text)
+
+        let parentId: String?
+        let replyToName: String?
+        if let target = replyTarget {
+            parentId = target.parentId ?? target.id
+            replyToName = target.authorName
+        } else {
+            parentId = nil
+            replyToName = nil
+        }
+
+        let comment = Comment(body: text, parentId: parentId, replyToName: replyToName)
         var comments = entry.comments
         comments.append(comment)
         entry.comments = comments
         entry.commentCount = comments.count
         try? modelContext.save()
+
+        if entry.authorId != "self" {
+            let myName = UserDefaults.standard.string(forKey: "user_display_name") ?? "我"
+            NotificationService.shared.add(AppNotification(
+                type: .comment,
+                title: "\(myName) 评论了词条",
+                body: "「\(entry.title)」—— \(text.prefix(30))",
+                relatedEntryId: entry.id,
+                fromUserName: myName
+            ))
+        }
+
         newDiscussionText = ""
+        replyTarget = nil
         discussionFocused = false
     }
 
@@ -594,6 +766,28 @@ struct EntryPageView: View {
             entry.comments = comments
             try? modelContext.save()
         }
+    }
+
+    private func navigateToCommentAuthor(_ authorName: String) {
+        let myName = UserDefaults.standard.string(forKey: "user_display_name") ?? "我"
+        if authorName == myName {
+            if let goMyPage = onNavigateToMyPage {
+                goMyPage()
+            }
+        } else {
+            let userId = resolveUserId(for: authorName)
+            targetUser = UserDestination(userName: authorName, userId: userId)
+            showUserProfile = true
+        }
+    }
+
+    private func resolveUserId(for name: String) -> String {
+        let knownUsers: [String: String] = [
+            "昱东": "yudong", "林清": "linqing", "陈小鱼": "chenxiaoyu",
+            "爸爸": "baba", "妈妈": "mama", "姐姐": "sister",
+            "阿花": "ahua", "小明": "xiaoming", "大壮": "dazhuang"
+        ]
+        return knownUsers[name] ?? name.lowercased()
     }
 
     private func discussionRelativeTime(_ date: Date) -> String {
@@ -610,23 +804,61 @@ struct EntryPageView: View {
     // MARK: - Hero
 
     private func heroImage(_ entry: Entry) -> some View {
+        let realURL: String? = entry.coverImageURL
+            ?? entry.sections.first(where: { !$0.imageRefs.isEmpty })?.imageRefs.first
+
         let seed = abs(entry.title.hashValue) % 1000
-        return AsyncImage(url: URL(string: "https://picsum.photos/seed/\(seed)/1200/675")) { phase in
-            if let image = phase.image {
-                image.resizable().aspectRatio(16/9, contentMode: .fill)
+        let ratios: [CGFloat] = [4.0/3, 3.0/2, 16.0/9, 1.0]
+        let ratio = ratios[seed % ratios.count]
+
+        return Group {
+            if let urlStr = realURL, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else if phase.error != nil {
+                        heroPlaceholder(entry: entry, ratio: ratio)
+                    } else {
+                        Rectangle().fill(Color.wikiBgSecondary)
+                            .overlay(ProgressView())
+                    }
+                }
             } else {
-                Rectangle().fill(Color.wikiBgSecondary)
-                    .aspectRatio(16/9, contentMode: .fit)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .font(.system(size: 40))
-                            .foregroundColor(.wikiTertiary)
-                    )
+                heroPlaceholder(entry: entry, ratio: ratio)
             }
         }
         .frame(maxWidth: .infinity)
-        .aspectRatio(16/9, contentMode: .fit)
+        .aspectRatio(ratio, contentMode: .fit)
         .clipped()
+    }
+
+    private func heroPlaceholder(entry: Entry, ratio: CGFloat) -> some View {
+        let seed = abs(entry.title.hashValue) % 1000
+        let hue = Double(seed % 360) / 360.0
+        return Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color(hue: hue, saturation: 0.08, brightness: 0.97),
+                        Color(hue: hue, saturation: 0.15, brightness: 0.90)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .aspectRatio(ratio, contentMode: .fit)
+            .overlay(
+                VStack(spacing: 6) {
+                    Image(systemName: "text.book.closed")
+                        .font(.system(size: 32, weight: .ultraLight))
+                        .foregroundColor(.wikiTertiary.opacity(0.5))
+                    if !entry.title.isEmpty {
+                        Text(entry.title)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.wikiTertiary.opacity(0.6))
+                    }
+                }
+            )
     }
 
     // MARK: - Title
@@ -665,6 +897,42 @@ struct EntryPageView: View {
             }
             Text(parseWikiText(section.body))
                 .font(.wikiBody).foregroundColor(.wikiText).wikiReadingStyle()
+
+            if !section.imageRefs.isEmpty {
+                ForEach(section.imageRefs, id: \.self) { urlStr in
+                    if let url = URL(string: urlStr) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFit()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                            case .failure:
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.wikiBgSecondary)
+                                    .frame(height: 120)
+                                    .overlay(
+                                        Image(systemName: "photo")
+                                            .foregroundColor(.wikiTertiary)
+                                    )
+                            case .empty:
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.wikiBgSecondary)
+                                    .frame(height: 200)
+                                    .overlay(
+                                        ProgressView()
+                                    )
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
         }
     }
 
@@ -788,27 +1056,34 @@ struct EntryPageView: View {
         }
     }
 
+    @State private var showLinkInput = false
+    @State private var linkInputText = ""
+
     private var attachmentSheet: some View {
         NavigationStack {
             List {
                 PhotosPicker(selection: $selectedPhotos, maxSelectionCount: 5, matching: .images) {
                     Label("从相册选图", systemImage: "photo.on.rectangle")
                 }
-                Button { showAttachmentSheet = false } label: {
-                    Label("拍照", systemImage: "camera")
-                }
-                Button { showAttachmentSheet = false } label: {
-                    Label("选择文件", systemImage: "doc")
-                }
                 Button {
-                    attachments.append(AttachmentItem(type: .link, name: "已粘贴链接"))
-                    showAttachmentSheet = false
+                    showLinkInput = true
                 } label: {
                     Label("粘贴链接", systemImage: "link")
                 }
-                Button { showAttachmentSheet = false } label: {
-                    Label("录音", systemImage: "mic")
+            }
+            .alert("粘贴链接", isPresented: $showLinkInput) {
+                TextField("https://...", text: $linkInputText)
+                Button("取消", role: .cancel) { linkInputText = "" }
+                Button("添加") {
+                    let url = linkInputText.trimmingCharacters(in: .whitespaces)
+                    if !url.isEmpty {
+                        attachments.append(AttachmentItem(type: .link, name: url, linkURL: url))
+                    }
+                    linkInputText = ""
+                    showAttachmentSheet = false
                 }
+            } message: {
+                Text("输入要添加的网页链接")
             }
             .listStyle(.insetGrouped)
             .navigationTitle("添加内容")
@@ -820,11 +1095,21 @@ struct EntryPageView: View {
             }
         }
         .onChange(of: selectedPhotos) {
-            for item in selectedPhotos {
-                attachments.append(AttachmentItem(type: .image, name: item.itemIdentifier ?? "图片"))
-            }
+            let items = selectedPhotos
             selectedPhotos = []
             showAttachmentSheet = false
+            Task {
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data),
+                       let jpeg = uiImage.jpegData(compressionQuality: 0.6) {
+                        let b64 = jpeg.base64EncodedString()
+                        await MainActor.run {
+                            attachments.append(AttachmentItem(type: .image, name: "图片", imageBase64: b64))
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -859,7 +1144,12 @@ struct EntryPageView: View {
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        messages.append(ChatMessage(role: .user, content: text))
+
+        let imageData = attachments.compactMap(\.imageBase64)
+        let hasImages = !imageData.isEmpty
+        print("🔴🔴🔴 sendMessage called: text=\(text.prefix(30)), hasImages=\(hasImages), imageCount=\(imageData.count), b64Lengths=\(imageData.map(\.count))")
+        let displayText = hasImages ? "📷×\(imageData.count) \(text)" : text
+        messages.append(ChatMessage(role: .user, content: displayText))
         inputText = ""
         attachments = []
 
@@ -867,10 +1157,31 @@ struct EntryPageView: View {
 
         Task {
             do {
+                // 用户上传的图片 → 持久化到 Storage，拿到永久 URL
+                var uploadedURLs: [String] = []
+                if hasImages {
+                    for (idx, b64) in imageData.enumerated() {
+                        print("[Upload] 图片\(idx+1) base64长度=\(b64.count)")
+                        do {
+                            let url = try await SupabaseService.shared.uploadBase64Image(b64)
+                            uploadedURLs.append(url)
+                            print("[Upload] 图片\(idx+1) 上传成功: \(url)")
+                        } catch {
+                            print("[Upload] 图片\(idx+1) 上传失败: \(error)")
+                        }
+                    }
+                }
+
                 let snapshot = entry.map { EntrySnapshot(from: $0) }
+                let editable = entry?.canEdit ?? false
+                // 优先用 URL（AI 既能看图又能拿到链接），上传失败时才 fallback base64
+                let useBase64Fallback = hasImages && uploadedURLs.isEmpty
                 let result = try await AIService.shared.chat(
                     messages: messages,
-                    currentEntry: snapshot
+                    currentEntry: snapshot,
+                    imageBase64List: useBase64Fallback ? imageData : nil,
+                    uploadedImageURLs: uploadedURLs.isEmpty ? nil : uploadedURLs,
+                    canEdit: editable
                 )
 
                 await MainActor.run {
@@ -897,6 +1208,71 @@ struct EntryPageView: View {
                             data.apply(to: entry)
                         }
                         try? modelContext.save()
+
+                        NotificationService.shared.add(AppNotification(
+                            type: .aiUpdate,
+                            title: "词条编纂完成",
+                            body: "AI 助手完成了「\(entry.title)」的更新",
+                            relatedEntryId: entry.id
+                        ))
+                    }
+                }
+
+                if !result.imageGenTasks.isEmpty, let entry = entry {
+                    await MainActor.run {
+                        withAnimation { aiStatus = .generatingImage }
+                        messages.append(ChatMessage(role: .system, content: "photo.artframe|正在生成 \(result.imageGenTasks.count) 张插图…"))
+                    }
+
+                    for task in result.imageGenTasks {
+                        do {
+                            let tempURL = try await ImageGenerationService.shared.generate(
+                                prompt: task.prompt,
+                                sectionTitle: task.sectionTitle
+                            )
+
+                            // 将临时 URL 持久化到 Supabase Storage
+                            let persistedURL: String
+                            do {
+                                persistedURL = try await SupabaseService.shared.persistImageFromURL(tempURL)
+                            } catch {
+                                print("[ImageGen] Storage 持久化失败，使用临时 URL: \(error)")
+                                persistedURL = tempURL
+                            }
+
+                            await MainActor.run {
+                                if let idx = entry.sections.firstIndex(where: { $0.title == task.sectionTitle }) {
+                                    var refs = entry.sections[idx].imageRefs
+                                    refs.append(persistedURL)
+                                    entry.sections[idx] = EntrySection(
+                                        title: entry.sections[idx].title,
+                                        body: entry.sections[idx].body,
+                                        imageRefs: refs
+                                    )
+                                } else if !entry.sections.isEmpty {
+                                    var refs = entry.sections[0].imageRefs
+                                    refs.append(persistedURL)
+                                    entry.sections[0] = EntrySection(
+                                        title: entry.sections[0].title,
+                                        body: entry.sections[0].body,
+                                        imageRefs: refs
+                                    )
+                                }
+                                if entry.coverImageURL == nil || entry.coverImageURL?.isEmpty == true {
+                                    entry.coverImageURL = persistedURL
+                                }
+                                try? modelContext.save()
+                                messages.append(ChatMessage(role: .system, content: "checkmark.circle|「\(task.sectionTitle)」插图已生成"))
+                            }
+                        } catch {
+                            await MainActor.run {
+                                messages.append(ChatMessage(role: .system, content: "exclamationmark.triangle|插图生成失败: \(error.localizedDescription)"))
+                            }
+                        }
+                    }
+
+                    await MainActor.run {
+                        withAnimation { aiStatus = nil }
                     }
                 }
             } catch {
@@ -909,6 +1285,27 @@ struct EntryPageView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Collaboration Actions
+
+    private func requestCollaboration(_ entry: Entry) {
+        withAnimation(.spring(response: 0.3)) { hasRequestedCollab = true }
+        NotificationService.shared.add(AppNotification(
+            type: .collabRequest,
+            title: "合编申请",
+            body: "有人申请成为「\(entry.title.isEmpty ? "未命名词条" : entry.title)」的合编者",
+            relatedEntryId: entry.id,
+            fromUserName: "我"
+        ))
+    }
+
+    private func leaveCollaboration(_ entry: Entry) {
+        var list = entry.contributorNames ?? []
+        list.removeAll { $0 == "我" }
+        entry.contributorNames = list
+        try? modelContext.save()
+        dismiss()
     }
 
     // MARK: - Wiki Text
@@ -951,6 +1348,8 @@ struct AttachmentItem: Identifiable {
     let id = UUID()
     var type: AttachmentType
     var name: String
+    var imageBase64: String?
+    var linkURL: String?
 }
 
 enum AttachmentType {
