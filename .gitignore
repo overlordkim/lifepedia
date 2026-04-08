@@ -32,3 +32,14 @@ Secrets.swift
 # Word temp files
 .~*.docx
 ~$*.docx
+*.docx
+
+# Reference docs (not code)
+apidocs/
+past.md
+ref.md
+lifepedia.md
+doc.md
+update41.md
+product.md
+TECH_ROADMAP.md
