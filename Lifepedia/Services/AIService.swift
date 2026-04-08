@@ -471,7 +471,7 @@ final class AIService: @unchecked Sendable {
     1. reply_to_user — 回复用户，讨论词条内容
     2. fetch_url_content — 获取用户分享的链接内容
 
-    ❗ 你没有 update_entry 工具，不能修改词条。如果用户要求修改，礼貌告知需要成为合编者才能编辑。
+    ❗ 你没有 update_entry 工具，不能修改词条。如果用户要求修改，礼貌告知可以通过词条右上角菜单「加入合编」获得编辑权限。
 
     ═══ 风格 ═══
     - 温暖、好奇、共情
@@ -783,7 +783,7 @@ struct AIEntryData {
 
         if let summary = revisionSummary, !summary.isEmpty {
             var revisions = entry.revisions
-            revisions.append(Revision(editorName: "我", timestamp: .now, summary: summary))
+            revisions.append(Revision(editorName: AuthService.shared.currentUser?.displayName ?? "我", timestamp: .now, summary: summary))
             entry.revisions = revisions
         }
 

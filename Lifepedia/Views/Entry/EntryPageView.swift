@@ -29,13 +29,24 @@ struct EntryPageView: View {
     @State private var newDiscussionText = ""
     @State private var scrollToDiscussion = false
     @State private var targetUser: UserDestination?
-    @State private var showUserProfile = false
     @State private var replyTarget: Comment?
-    @State private var hasRequestedCollab = false
+    @State private var showShareImage = false
     @FocusState private var discussionFocused: Bool
 
     private var entry: Entry? {
         allEntries.first { $0.id == entryId }
+    }
+
+    private var greetingForCurrentPermission: String {
+        let myId = AuthService.shared.currentUser?.id ?? "self"
+        let isOwner = entry?.authorId == myId
+        if entry?.canEdit == true {
+            return isOwner
+                ? "你好，我是你的词条编纂助手。告诉我一段回忆，我来帮你写成百科词条。"
+                : "你好，你已是这篇词条的合编者，可以和我一起编辑完善它。"
+        } else {
+            return "你好，让我们一起品味这篇词条吧。你觉得哪里最打动你？"
+        }
     }
 
     var body: some View {
@@ -60,10 +71,14 @@ struct EntryPageView: View {
                 }
             }
             if messages.isEmpty {
-                let greeting = (entry?.canEdit == true)
-                    ? "你好，我是你的词条编纂助手。告诉我一段回忆，我来帮你写成百科词条。"
-                    : "你好，让我们一起品味这篇词条吧。你觉得哪里最打动你？"
-                messages = [ChatMessage(role: .assistant, content: greeting)]
+                messages = [ChatMessage(role: .assistant, content: greetingForCurrentPermission)]
+            }
+        }
+        .onChange(of: entry?.canEdit) { oldVal, newVal in
+            guard oldVal != newVal else { return }
+            let onlyGreeting = messages.count == 1 && messages.first?.role == .assistant
+            if onlyGreeting {
+                messages = [ChatMessage(role: .assistant, content: greetingForCurrentPermission)]
             }
         }
     }
@@ -122,7 +137,8 @@ struct EntryPageView: View {
                                 withAnimation(.easeOut(duration: 0.4)) {
                                     scrollProxy.scrollTo("discussion-header", anchor: .top)
                                 }
-                            }
+                            },
+                            onShareImage: { showShareImage = true }
                         )
                         .transition(.opacity)
                     }
@@ -137,11 +153,9 @@ struct EntryPageView: View {
                 moreMenuOverlay(entry)
             }
         }
-        .navigationDestination(isPresented: $showUserProfile) {
-            if let user = targetUser {
-                UserProfileView(userName: user.userName, userId: user.userId)
-                    .navigationBarHidden(true)
-            }
+        .navigationDestination(item: $targetUser) { user in
+            UserProfileView(userName: user.userName, userId: user.userId)
+                .navigationBarHidden(true)
         }
         .sheet(isPresented: $showVisibilitySheet) {
             VisibilitySheet(entry: entry)
@@ -152,6 +166,9 @@ struct EntryPageView: View {
             CollaboratorsSheet(entry: entry)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showShareImage) {
+            ShareImageSheet(entry: entry)
         }
         .overlay {
             if showLinkInput {
@@ -178,7 +195,8 @@ struct EntryPageView: View {
             }
 
             Button {
-                if entry.authorId == "self" {
+                let myId = AuthService.shared.currentUser?.id ?? "self"
+                if entry.authorId == myId {
                     if let goMyPage = onNavigateToMyPage {
                         goMyPage()
                     } else {
@@ -186,12 +204,10 @@ struct EntryPageView: View {
                     }
                 } else {
                     targetUser = UserDestination(userName: entry.authorName, userId: entry.authorId)
-                    showUserProfile = true
                 }
             } label: {
                 HStack(spacing: 8) {
-                    let seed = abs(entry.authorName.hashValue) % 200
-                    AsyncImage(url: URL(string: "https://i.pravatar.cc/80?img=\(seed)")) { phase in
+                    AsyncImage(url: Secrets.avatarURL(for: entry.authorId)) { phase in
                         if let image = phase.image {
                             image.resizable().scaledToFill()
                         } else {
@@ -284,24 +300,37 @@ struct EntryPageView: View {
 
             // 菜单卡片
             VStack(alignment: .leading, spacing: 0) {
-                if entry.canEdit {
+                let myId = AuthService.shared.currentUser?.id ?? "self"
+                let isOwner = entry.authorId == myId
+
+                if isOwner {
                     moreMenuItem(icon: entry.scope.icon, title: "可见性", subtitle: entry.scope.label) {
                         closeMenuThen { showVisibilitySheet = true }
                     }
+                }
 
-                    if entry.scope == .collaborative || entry.scope == .public {
-                        moreMenuItem(icon: "person.2", title: "合编者", subtitle: "\(entry.contributorNames?.count ?? 0) 人") {
-                            closeMenuThen { showCollaboratorsSheet = true }
+                if entry.scope == .collaborative || entry.scope == .public {
+                    moreMenuItem(icon: "person.2", title: "合编者", subtitle: "\(entry.contributorNames?.count ?? 0) 人") {
+                        closeMenuThen { showCollaboratorsSheet = true }
+                    }
+                }
+
+                if entry.canEdit && !isOwner {
+                    menuDivider
+                    moreMenuItem(icon: "rectangle.portrait.and.arrow.right", title: "退出合编", isDestructive: true) {
+                        closeMenuThen { leaveCollaboration(entry) }
+                    }
+                }
+
+                if !entry.canEdit {
+                    if !(entry.contributorNames ?? []).contains(AuthService.shared.currentUser?.displayName ?? "") {
+                        moreMenuItem(icon: "person.badge.plus", title: "加入合编") {
+                            closeMenuThen { joinCollaboration(entry) }
                         }
                     }
+                }
 
-                    if entry.authorId != "self" {
-                        menuDivider
-                        moreMenuItem(icon: "rectangle.portrait.and.arrow.right", title: "退出合编", isDestructive: true) {
-                            closeMenuThen { leaveCollaboration(entry) }
-                        }
-                    }
-
+                if isOwner {
                     menuDivider
                     moreMenuItem(icon: "trash", title: "删除", isDestructive: true) {
                         closeMenuThen {
@@ -310,21 +339,6 @@ struct EntryPageView: View {
                             try? modelContext.save()
                             Task { try? await SupabaseService.shared.deleteEntry(id: id) }
                             if let goHome = onDismissToFeed { goHome() } else { dismiss() }
-                        }
-                    }
-                } else {
-                    if (entry.scope == .collaborative || entry.scope == .public) {
-                        moreMenuItem(icon: "person.2", title: "合编者", subtitle: "\(entry.contributorNames?.count ?? 0) 人") {
-                            closeMenuThen { showCollaboratorsSheet = true }
-                        }
-                        menuDivider
-                    }
-
-                    if entry.scope == .public {
-                        moreMenuItem(icon: "person.badge.plus", title: hasRequestedCollab ? "已申请合编" : "申请成为合编者") {
-                            closeMenuThen {
-                                if !hasRequestedCollab { requestCollaboration(entry) }
-                            }
                         }
                     }
                 }
@@ -492,12 +506,10 @@ struct EntryPageView: View {
 
     private func discussionRow(_ comment: Comment, entry: Entry) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            let seed = abs(comment.authorName.hashValue) % 200
-
             Button {
                 navigateToCommentAuthor(comment.authorName)
             } label: {
-                AsyncImage(url: URL(string: "https://i.pravatar.cc/64?img=\(seed)")) { phase in
+                AsyncImage(url: Secrets.avatarURL(for: AuthService.shared.currentUser?.id ?? "self")) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
                     } else {
@@ -580,11 +592,10 @@ struct EntryPageView: View {
 
     private func discussionReplyRow(_ reply: Comment, entry: Entry) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            let seed = abs(reply.authorName.hashValue) % 200
             Button {
                 navigateToCommentAuthor(reply.authorName)
             } label: {
-                AsyncImage(url: URL(string: "https://i.pravatar.cc/48?img=\(seed)")) { phase in
+                AsyncImage(url: Secrets.avatarURL(for: AuthService.shared.currentUser?.id ?? "self")) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
                     } else {
@@ -748,8 +759,8 @@ struct EntryPageView: View {
         entry.commentCount = comments.count
         try? modelContext.save()
 
-        if entry.authorId != "self" {
-            let myName = UserDefaults.standard.string(forKey: "user_display_name") ?? "我"
+        if entry.authorId != (AuthService.shared.currentUser?.id ?? "self") {
+            let myName = AuthService.shared.currentUser?.displayName ?? "我"
             NotificationService.shared.add(AppNotification(
                 type: .comment,
                 title: "\(myName) 评论了词条",
@@ -774,7 +785,7 @@ struct EntryPageView: View {
     }
 
     private func navigateToCommentAuthor(_ authorName: String) {
-        let myName = UserDefaults.standard.string(forKey: "user_display_name") ?? "我"
+        let myName = AuthService.shared.currentUser?.displayName ?? "我"
         if authorName == myName {
             if let goMyPage = onNavigateToMyPage {
                 goMyPage()
@@ -782,7 +793,6 @@ struct EntryPageView: View {
         } else {
             let userId = resolveUserId(for: authorName)
             targetUser = UserDestination(userName: authorName, userId: userId)
-            showUserProfile = true
         }
     }
 
@@ -816,25 +826,25 @@ struct EntryPageView: View {
         let ratios: [CGFloat] = [4.0/3, 3.0/2, 16.0/9, 1.0]
         let ratio = ratios[seed % ratios.count]
 
-        return Group {
-            if let urlStr = realURL, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else if phase.error != nil {
-                        heroPlaceholder(entry: entry, ratio: ratio)
-                    } else {
-                        Rectangle().fill(Color.wikiBgSecondary)
-                            .overlay(ProgressView())
+        return Color.clear
+            .aspectRatio(ratio, contentMode: .fit)
+            .overlay {
+                if let urlStr = realURL, let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else if phase.error != nil {
+                            heroPlaceholder(entry: entry, ratio: ratio)
+                        } else {
+                            Rectangle().fill(Color.wikiBgSecondary)
+                                .overlay(ProgressView())
+                        }
                     }
+                } else {
+                    heroPlaceholder(entry: entry, ratio: ratio)
                 }
-            } else {
-                heroPlaceholder(entry: entry, ratio: ratio)
             }
-        }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(ratio, contentMode: .fit)
-        .clipped()
+            .clipShape(Rectangle())
     }
 
     private func heroPlaceholder(entry: Entry, ratio: CGFloat) -> some View {
@@ -1353,22 +1363,28 @@ struct EntryPageView: View {
 
     // MARK: - Collaboration Actions
 
-    private func requestCollaboration(_ entry: Entry) {
-        withAnimation(.spring(response: 0.3)) { hasRequestedCollab = true }
-        NotificationService.shared.add(AppNotification(
-            type: .collabRequest,
-            title: "合编申请",
-            body: "有人申请成为「\(entry.title.isEmpty ? "未命名词条" : entry.title)」的合编者",
-            relatedEntryId: entry.id,
-            fromUserName: "我"
-        ))
+    private func joinCollaboration(_ entry: Entry) {
+        let name = AuthService.shared.currentUser?.displayName ?? ""
+        guard !name.isEmpty else { return }
+        var list = entry.contributorNames ?? []
+        guard !list.contains(name) else { return }
+        list.append(name)
+        entry.contributorNames = list
+        try? modelContext.save()
+        if entry.status == .published {
+            Task { try? await SupabaseService.shared.updateCollaborators(entryId: entry.id, names: list) }
+        }
     }
 
     private func leaveCollaboration(_ entry: Entry) {
+        let name = AuthService.shared.currentUser?.displayName ?? ""
         var list = entry.contributorNames ?? []
-        list.removeAll { $0 == "我" }
+        list.removeAll { $0 == name }
         entry.contributorNames = list
         try? modelContext.save()
+        if entry.status == .published {
+            Task { try? await SupabaseService.shared.updateCollaborators(entryId: entry.id, names: list) }
+        }
         dismiss()
     }
 

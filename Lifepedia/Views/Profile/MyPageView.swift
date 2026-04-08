@@ -18,23 +18,25 @@ struct MyPageView: View {
         case favorited = "收藏"
     }
 
+    private var myId: String { AuthService.shared.currentUser?.id ?? "self" }
+
     private var draftEntries: [Entry] {
-        allEntries.filter { $0.isDraft && $0.authorId == "self" }
+        allEntries.filter { $0.isDraft && $0.authorId == myId }
     }
 
     private var publishedEntries: [Entry] {
         var entries: [Entry]
         switch selectedSubTab {
         case .authored:
-            entries = allEntries.filter { $0.authorId == "self" && !$0.isDraft }
+            entries = allEntries.filter { $0.authorId == myId && !$0.isDraft }
         case .coEditing:
             entries = allEntries.filter {
-                !$0.isDraft && $0.authorId != "self" &&
+                !$0.isDraft && $0.authorId != myId &&
                 ($0.scope == .collaborative || $0.scope == .public) &&
-                (($0.contributorNames ?? []).contains("我") || ($0.contributorNames ?? []).contains(displayName))
+                (($0.contributorNames ?? []).contains(displayName))
             }
         case .favorited:
-            entries = allEntries.filter { $0.authorId != "self" && !$0.isDraft }
+            entries = allEntries.filter { $0.authorId != myId && !$0.isDraft }
         }
         if let cat = selectedCategory {
             entries = entries.filter { $0.category == cat }
@@ -102,7 +104,7 @@ struct MyPageView: View {
     private var profileHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 20) {
-                AsyncImage(url: URL(string: "https://i.pravatar.cc/160?img=\(avatarSeed)")) { phase in
+                AsyncImage(url: Secrets.avatarURL(for: AuthService.shared.currentUser?.id ?? "self")) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
                     } else {
@@ -118,9 +120,9 @@ struct MyPageView: View {
                 .clipShape(Circle())
 
                 HStack(spacing: 0) {
-                    statItem(value: allEntries.filter { $0.authorId == "self" && !$0.isDraft }.count, label: "词条")
-                    statItem(value: followingSet.count, label: "关注", action: { showFollowingSheet = true })
-                    statItem(value: followerNames.count, label: "被关注", action: { showFollowersSheet = true })
+                    statItem(value: allEntries.filter { $0.authorId == (AuthService.shared.currentUser?.id ?? "self") && !$0.isDraft }.count, label: "词条")
+                    statItem(value: followingIds.count, label: "关注", action: { showFollowingSheet = true })
+                    statItem(value: followerIds.count, label: "被关注", action: { showFollowersSheet = true })
                 }
             }
             .padding(.horizontal, 16)
@@ -141,15 +143,24 @@ struct MyPageView: View {
         .fullScreenCover(isPresented: $showSettings) {
             SettingsView()
         }
+        .task { await followService.syncFromRemote() }
         .sheet(isPresented: $showFollowingSheet) {
-            followListSheet(title: "关注", users: Array(followingSet).map { ($0, resolveUserId(for: $0), abs($0.hashValue) % 70) }, isFollowingList: true)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+            followListSheet(
+                title: "关注",
+                users: Array(followingIds).map { (followService.displayName(for: $0), $0, followService.avatarSeed(for: $0)) },
+                isFollowingList: true
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showFollowersSheet) {
-            followListSheet(title: "被关注", users: followerNames.map { ($0, resolveUserId(for: $0), abs($0.hashValue) % 70) }, isFollowingList: false)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+            followListSheet(
+                title: "被关注",
+                users: Array(followerIds).map { (followService.displayName(for: $0), $0, followService.avatarSeed(for: $0)) },
+                isFollowingList: false
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -177,7 +188,7 @@ struct MyPageView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(users, id: \.0) { user in
+                        ForEach(users, id: \.1) { user in
                             Button {
                                 showFollowingSheet = false
                                 showFollowersSheet = false
@@ -186,7 +197,7 @@ struct MyPageView: View {
                                 }
                             } label: {
                                 HStack(spacing: 12) {
-                                    AsyncImage(url: URL(string: "https://i.pravatar.cc/80?img=\(user.2)")) { phase in
+                                    AsyncImage(url: Secrets.avatarURL(for: user.1)) { phase in
                                         if let image = phase.image {
                                             image.resizable().scaledToFill()
                                         } else {
@@ -205,26 +216,23 @@ struct MyPageView: View {
                                         Text(user.0)
                                             .font(.system(size: 15, weight: .medium))
                                             .foregroundColor(.wikiText)
-                                        Text("@\(user.1)")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.wikiTertiary)
                                     }
 
                                     Spacer()
 
                                     Button {
                                         withAnimation(.spring(response: 0.3)) {
-                                            followService.toggle(user.0)
+                                            followService.toggle(user.1)
                                         }
                                     } label: {
-                                        Text(followService.isFollowing(user.0) ? "已关注" : (isFollowingList ? "关注" : "回关"))
+                                        Text(followService.isFollowing(user.1) ? "已关注" : (isFollowingList ? "关注" : "回关"))
                                             .font(.system(size: 12, weight: .medium))
-                                            .foregroundColor(followService.isFollowing(user.0) ? .wikiSecondary : .white)
+                                            .foregroundColor(followService.isFollowing(user.1) ? .wikiSecondary : .white)
                                             .padding(.horizontal, 14)
                                             .padding(.vertical, 6)
                                             .background(
                                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                    .fill(followService.isFollowing(user.0) ? Color.wikiBgSecondary : Color.wikiBlue)
+                                                    .fill(followService.isFollowing(user.1) ? Color.wikiBgSecondary : Color.wikiBlue)
                                             )
                                     }
                                 }
@@ -422,8 +430,9 @@ struct MyPageView: View {
     @State private var showFollowingSheet = false
     @State private var showFollowersSheet = false
 
-    private var followService: FollowService { FollowService.shared }
-    private var followingSet: Set<String> { followService.followingSet }
-    private var followerNames: [String] { followService.followerNames }
+    @State private var followService = FollowService.shared
+
+    private var followingIds: Set<String> { followService.followingIds }
+    private var followerIds: Set<String> { followService.followerIds }
 
 }

@@ -5,6 +5,8 @@ struct FloatingActionBar: View {
     @Binding var isLiked: Bool
     @Binding var isBookmarked: Bool
     var onCommentTap: () -> Void = {}
+    var onShareImage: () -> Void = {}
+    @State private var showShareOptions = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,8 +18,8 @@ struct FloatingActionBar: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
                             isLiked.toggle()
                         }
-                        if isLiked && entry.authorId != "self" {
-                            let myName = UserDefaults.standard.string(forKey: "user_display_name") ?? "我"
+                        if isLiked && entry.authorId != (AuthService.shared.currentUser?.id ?? "self") {
+                            let myName = AuthService.shared.currentUser?.displayName ?? "我"
                             NotificationService.shared.add(AppNotification(
                                 type: .like,
                                 title: "\(myName) 赞了词条",
@@ -49,17 +51,22 @@ struct FloatingActionBar: View {
                         }
                     }
 
-                    Button {
-                        let text = "来看看「\(entry.title)」这篇词条 — 人间词条 Lifepedia"
-                        let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-                        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                           let root = scene.windows.first?.rootViewController {
-                            root.present(av, animated: true)
-                        }
-                    } label: {
+                    Button { showShareOptions = true } label: {
                         Image(systemName: "paperplane")
                             .font(.system(size: 22, weight: .light))
                             .foregroundColor(.wikiText)
+                    }
+                    .confirmationDialog("分享", isPresented: $showShareOptions) {
+                        Button("生成长图") { onShareImage() }
+                        Button("分享文字") {
+                            let text = "来看看「\(entry.title)」这篇词条 — 人间词条 Lifepedia"
+                            let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+                            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                               let root = scene.windows.first?.rootViewController {
+                                root.present(av, animated: true)
+                            }
+                        }
+                        Button("取消", role: .cancel) {}
                     }
                 }
 

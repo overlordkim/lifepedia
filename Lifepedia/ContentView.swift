@@ -113,8 +113,16 @@ struct ContentView: View {
             return
         }
 
-        let entry = Entry(title: "", category: .person, scope: .private, status: .draft)
-        entry.draft = EntryDraft(lastEditedAt: .now, lastEditedBy: "我")
+        let user = AuthService.shared.currentUser
+        let entry = Entry(
+            title: "",
+            category: .person,
+            scope: .private,
+            authorName: user?.displayName ?? "我",
+            authorId: user?.id ?? "self",
+            status: .draft
+        )
+        entry.draft = EntryDraft(lastEditedAt: .now, lastEditedBy: user?.displayName ?? "我")
         modelContext.insert(entry)
         try? modelContext.save()
         composeEntry = entry
@@ -242,7 +250,7 @@ struct ComposeEntryWrapper: View {
                     .frame(width: 28, height: 28)
             }
 
-            AsyncImage(url: URL(string: "https://i.pravatar.cc/80?img=\(avatarSeed)")) { phase in
+            AsyncImage(url: Secrets.avatarURL(for: AuthService.shared.currentUser?.id ?? "self")) { phase in
                 if let image = phase.image {
                     image.resizable().scaledToFill()
                 } else {

@@ -9,8 +9,6 @@ struct NotificationListView: View {
 
     @State private var selectedEntryId: UUID?
     @State private var selectedUser: UserDestination?
-    @State private var navigateToEntry = false
-    @State private var navigateToUser = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,17 +39,13 @@ struct NotificationListView: View {
         }
         .background(Color.wikiBg)
         .navigationBarHidden(true)
-        .navigationDestination(isPresented: $navigateToEntry) {
-            if let entryId = selectedEntryId {
-                EntryPageView(entryId: entryId)
-                    .navigationBarHidden(true)
-            }
+        .navigationDestination(item: $selectedEntryId) { entryId in
+            EntryPageView(entryId: entryId)
+                .navigationBarHidden(true)
         }
-        .navigationDestination(isPresented: $navigateToUser) {
-            if let user = selectedUser {
-                UserProfileView(userName: user.userName, userId: user.userId)
-                    .navigationBarHidden(true)
-            }
+        .navigationDestination(item: $selectedUser) { user in
+            UserProfileView(userName: user.userName, userId: user.userId)
+                .navigationBarHidden(true)
         }
     }
 
@@ -144,26 +138,14 @@ struct NotificationListView: View {
 
     private func handleTap(_ n: AppNotification) {
         switch n.type {
-        case .comment, .like, .coEdit, .aiUpdate:
+        case .comment, .like, .coEdit, .aiUpdate, .collabInvite, .collabRequest:
             if let entryId = n.relatedEntryId {
                 selectedEntryId = entryId
-                navigateToEntry = true
             }
         case .follow:
             if let name = n.fromUserName {
-                let knownUsers: [String: String] = [
-                    "昱东": "yudong", "林清": "linqing", "陈小鱼": "chenxiaoyu",
-                    "爸爸": "baba", "妈妈": "mama", "姐姐": "sister",
-                    "阿花": "ahua", "小明": "xiaoming", "大壮": "dazhuang"
-                ]
-                let userId = knownUsers[name] ?? name.lowercased()
+                let userId = n.fromUserId ?? name.lowercased()
                 selectedUser = UserDestination(userName: name, userId: userId)
-                navigateToUser = true
-            }
-        case .collabInvite, .collabRequest:
-            if let entryId = n.relatedEntryId {
-                selectedEntryId = entryId
-                navigateToEntry = true
             }
         }
     }

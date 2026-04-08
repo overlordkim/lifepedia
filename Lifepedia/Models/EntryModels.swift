@@ -379,9 +379,11 @@ final class Entry {
     var hasPendingDraft: Bool { status == .published && draft != nil }
 
     var canEdit: Bool {
-        if authorId == "self" { return true }
+        let currentId = AuthService.shared.currentUser?.id
+        let currentName = AuthService.shared.currentUser?.displayName
+        if authorId == currentId || authorId == "self" { return true }
         let contributors = contributorNames ?? []
-        if scope == .collaborative && (contributors.contains("我") || contributors.contains(UserDefaults.standard.string(forKey: "user_display_name") ?? "我")) {
+        if let name = currentName, contributors.contains(name) {
             return true
         }
         return false
@@ -459,16 +461,18 @@ struct AppNotification: Identifiable, Codable {
     var body: String
     var relatedEntryId: UUID?
     var fromUserName: String?
+    var fromUserId: String?
     var isRead: Bool
     var createdAt: Date
 
-    init(id: String = UUID().uuidString, type: NotificationType, title: String, body: String, relatedEntryId: UUID? = nil, fromUserName: String? = nil, isRead: Bool = false, createdAt: Date = .now) {
+    init(id: String = UUID().uuidString, type: NotificationType, title: String, body: String, relatedEntryId: UUID? = nil, fromUserName: String? = nil, fromUserId: String? = nil, isRead: Bool = false, createdAt: Date = .now) {
         self.id = id
         self.type = type
         self.title = title
         self.body = body
         self.relatedEntryId = relatedEntryId
         self.fromUserName = fromUserName
+        self.fromUserId = fromUserId
         self.isRead = isRead
         self.createdAt = createdAt
     }

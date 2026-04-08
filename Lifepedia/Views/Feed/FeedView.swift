@@ -9,9 +9,10 @@ struct FeedView: View {
     var onNavigateToMyPage: (() -> Void)?
     @State private var navigationPath = NavigationPath()
     @State private var isSyncing = false
+    @State private var shuffleSeed = UInt64.random(in: 0...UInt64.max)
     @State private var showSearch = false
     @State private var searchText = ""
-    @State private var showNotifications = false
+    private struct NotificationRoute: Hashable {}
     @State private var searchMode: SearchMode = .all
 
     enum SearchMode: String, CaseIterable {
@@ -23,6 +24,7 @@ struct FeedView: View {
     private var notificationService: NotificationService { NotificationService.shared }
 
     private var filteredEntries: [Entry] {
+        let myId = AuthService.shared.currentUser?.id ?? "self"
         var list = allEntries.filter { !$0.isDraft }
         if let cat = selectedCategory {
             list = list.filter { $0.category == cat }
@@ -34,7 +36,11 @@ struct FeedView: View {
                 ($0.introductionText ?? "").lowercased().contains(q) ||
                 $0.authorName.lowercased().contains(q)
             }
+            list.sort { a, b in a.updatedAt > b.updatedAt }
+            return list
         }
+        var rng = SeededRNG(seed: shuffleSeed)
+        list.shuffle(using: &rng)
         return list
     }
 
@@ -45,7 +51,8 @@ struct FeedView: View {
         var result: [(String, String, Int, Int)] = []
         for entry in allEntries where !entry.isDraft {
             let aid = entry.authorId
-            guard !seen.contains(aid), aid != "self" else { continue }
+            let myId = AuthService.shared.currentUser?.id ?? "self"
+            guard !seen.contains(aid), aid != myId else { continue }
             if entry.authorName.lowercased().contains(q) {
                 seen.insert(aid)
                 let count = allEntries.filter { $0.authorId == aid && !$0.isDraft }.count
@@ -62,17 +69,15 @@ struct FeedView: View {
                 topBar
 
                 if showSearch {
-                    ZStack(alignment: .topLeading) {
-                        searchBar
-
-                        if showSearchModeMenu {
-                            searchModeDropdown
-                                .padding(.leading, 16)
-                                .padding(.top, 42)
+                    searchBar
+                        .overlay(alignment: .topLeading) {
+                            if showSearchModeMenu {
+                                searchModeDropdown
+                                    .padding(.top, 42)
+                            }
                         }
-                    }
-                    .zIndex(10)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
                 CategoryFilterBar(selected: $selectedCategory)
@@ -93,7 +98,7 @@ struct FeedView: View {
                                         navigationPath.append(UserDestination(userName: user.name, userId: user.id))
                                     } label: {
                                         HStack(spacing: 12) {
-                                            AsyncImage(url: URL(string: "https://i.pravatar.cc/64?img=\(user.seed)")) { phase in
+                                            AsyncImage(url: Secrets.avatarURL(for: user.id)) { phase in
                                                 if let image = phase.image {
                                                     image.resizable().scaledToFill()
                                                 } else {
@@ -121,17 +126,17 @@ struct FeedView: View {
                                             let followSvc = FollowService.shared
                                             Button {
                                                 withAnimation(.spring(response: 0.3)) {
-                                                    followSvc.toggle(user.name)
+                                                    followSvc.toggle(user.id)
                                                 }
                                             } label: {
-                                                Text(followSvc.isFollowing(user.name) ? "已关注" : "关注")
+                                                Text(followSvc.isFollowing(user.id) ? "已关注" : "关注")
                                                     .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(followSvc.isFollowing(user.name) ? .wikiSecondary : .white)
+                                                    .foregroundColor(followSvc.isFollowing(user.id) ? .wikiSecondary : .white)
                                                     .padding(.horizontal, 12)
                                                     .padding(.vertical, 5)
                                                     .background(
                                                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                            .fill(followSvc.isFollowing(user.name) ? Color.wikiBgSecondary : Color.wikiBlue)
+                                                            .fill(followSvc.isFollowing(user.id) ? Color.wikiBgSecondary : Color.wikiBlue)
                                                     )
                                             }
                                         }
@@ -183,18 +188,14 @@ struct FeedView: View {
                 UserProfileView(userName: dest.userName, userId: dest.userId)
                     .navigationBarHidden(true)
             }
-            .navigationDestination(isPresented: $showNotifications) {
+            .navigationDestination(for: NotificationRoute.self) { _ in
                 NotificationListView()
+                    .navigationBarHidden(true)
             }
         }
         .onChange(of: navigationPath.count) {
             withAnimation(.easeInOut(duration: 0.25)) {
-                hideTabBar = !navigationPath.isEmpty || showNotifications
-            }
-        }
-        .onChange(of: showNotifications) {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                hideTabBar = !navigationPath.isEmpty || showNotifications
+                hideTabBar = !navigationPath.isEmpty
             }
         }
         .task { await syncFromSupabase() }
@@ -204,13 +205,15 @@ struct FeedView: View {
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
+        await MainActor.run { shuffleSeed = UInt64.random(in: 0...UInt64.max) }
         do {
             let remote = try await SupabaseService.shared.fetchPublishedEntries()
             await MainActor.run {
                 SupabaseService.shared.syncToLocal(
                     remoteEntries: remote,
                     localEntries: allEntries,
-                    insert: { modelContext.insert($0) }
+                    insert: { modelContext.insert($0) },
+                    delete: { modelContext.delete($0) }
                 )
                 try? modelContext.save()
             }
@@ -239,7 +242,7 @@ struct FeedView: View {
                         .foregroundColor(.wikiText)
                         .contentTransition(.symbolEffect(.replace))
                 }
-                Button { showNotifications = true } label: {
+                Button { navigationPath.append(NotificationRoute()) } label: {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: "bell")
                             .font(.system(size: 20, weight: .light))
@@ -339,5 +342,17 @@ struct FeedView: View {
         case .entries: return "搜索词条标题、作者……"
         case .users:   return "搜索用户名……"
         }
+    }
+}
+
+private struct SeededRNG: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9e3779b97f4a7c15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xbf58476d1ce4e5b9
+        z = (z ^ (z >> 27)) &* 0x94d049bb133111eb
+        return z ^ (z >> 31)
     }
 }

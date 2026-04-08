@@ -49,22 +49,22 @@ struct FeedCard: View {
         let ratios: [CGFloat] = [4/3, 3/2, 16/9, 1.0]
         let ratio = ratios[seed % ratios.count]
 
-        return Group {
-            if let urlStr = realURL, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        placeholder(ratio: ratio)
+        return Color.clear
+            .aspectRatio(ratio, contentMode: .fit)
+            .overlay {
+                if let urlStr = realURL, let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            placeholder(ratio: ratio)
+                        }
                     }
+                } else {
+                    placeholder(ratio: ratio)
                 }
-            } else {
-                placeholder(ratio: ratio)
             }
-        }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(ratio, contentMode: .fit)
-        .clipped()
+            .clipShape(Rectangle())
     }
 
     private func placeholder(ratio: CGFloat) -> some View {
@@ -107,12 +107,16 @@ struct FeedCard: View {
 
     private var bottomRow: some View {
         HStack(spacing: 8) {
-            let seed = abs(entry.authorName.hashValue) % 70
-            AsyncImage(url: URL(string: "https://i.pravatar.cc/48?img=\(seed)")) { phase in
+            AsyncImage(url: Secrets.avatarURL(for: entry.authorId)) { phase in
                 if let image = phase.image {
                     image.resizable().scaledToFill()
                 } else {
                     Circle().fill(Color(hex: 0xEEEEEE))
+                        .overlay(
+                            Text(String(entry.authorName.prefix(1)))
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.wikiSecondary)
+                        )
                 }
             }
             .frame(width: 20, height: 20)

@@ -1,17 +1,21 @@
 import SwiftUI
+import PhotosUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("user_display_name") private var displayName = "我"
     @AppStorage("user_bio") private var bio = "用百科的方式，记录我的人生"
-    @AppStorage("user_avatar_seed") private var avatarSeed = 32
 
     @State private var editingName = ""
     @State private var editingBio = ""
-    @State private var showAvatarPicker = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isUploading = false
+    @State private var avatarRefreshId = UUID()
     @FocusState private var focusedField: Field?
 
     enum Field { case name, bio }
+
+    private var myId: String { AuthService.shared.currentUser?.id ?? "self" }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,6 +28,8 @@ struct SettingsView: View {
                     aboutSection
                     Spacer().frame(height: 20)
                     saveButton
+                    Spacer().frame(height: 12)
+                    logoutButton
                     Spacer().frame(height: 40)
                 }
                 .padding(.top, 24)
@@ -35,13 +41,10 @@ struct SettingsView: View {
             editingName = displayName
             editingBio = bio
         }
-        .overlay {
-            if showAvatarPicker {
-                avatarPickerOverlay
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-            }
+        .onChange(of: selectedPhoto) {
+            guard let item = selectedPhoto else { return }
+            Task { await uploadAvatar(item) }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showAvatarPicker)
     }
 
     // MARK: - Top Bar
@@ -73,22 +76,29 @@ struct SettingsView: View {
 
     private var avatarSection: some View {
         VStack(spacing: 12) {
-            Button { showAvatarPicker = true } label: {
+            PhotosPicker(selection: $selectedPhoto, matching: .images) {
                 ZStack(alignment: .bottomTrailing) {
-                    AsyncImage(url: URL(string: "https://i.pravatar.cc/200?img=\(avatarSeed)")) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Circle().fill(Color.wikiBgSecondary)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 32))
-                                        .foregroundColor(.wikiTertiary)
-                                )
+                    if isUploading {
+                        Circle().fill(Color.wikiBgSecondary)
+                            .frame(width: 88, height: 88)
+                            .overlay(ProgressView())
+                    } else {
+                        AsyncImage(url: Secrets.avatarURL(for: myId)) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            } else {
+                                Circle().fill(Color.wikiBgSecondary)
+                                    .overlay(
+                                        Image(systemName: "person.fill")
+                                            .font(.system(size: 32))
+                                            .foregroundColor(.wikiTertiary)
+                                    )
+                            }
                         }
+                        .id(avatarRefreshId)
+                        .frame(width: 88, height: 88)
+                        .clipShape(Circle())
                     }
-                    .frame(width: 88, height: 88)
-                    .clipShape(Circle())
 
                     Image(systemName: "camera.circle.fill")
                         .font(.system(size: 26))
@@ -100,6 +110,26 @@ struct SettingsView: View {
             Text("点击更换头像")
                 .font(.system(size: 12))
                 .foregroundColor(.wikiTertiary)
+        }
+    }
+
+    private func uploadAvatar(_ item: PhotosPickerItem) async {
+        isUploading = true
+        defer { isUploading = false; selectedPhoto = nil }
+
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        let jpegData: Data
+        if let uiImage = UIImage(data: data), let compressed = uiImage.jpegData(compressionQuality: 0.85) {
+            jpegData = compressed
+        } else {
+            jpegData = data
+        }
+
+        do {
+            _ = try await SupabaseService.shared.uploadImage(jpegData, fileName: "../avatars/\(myId).jpg")
+            await MainActor.run { avatarRefreshId = UUID() }
+        } catch {
+            print("[Settings] avatar upload failed: \(error)")
         }
     }
 
@@ -164,6 +194,26 @@ struct SettingsView: View {
         .padding(.horizontal, 16)
     }
 
+    // MARK: - Logout
+
+    private var logoutButton: some View {
+        Button {
+            AuthService.shared.logout()
+            dismiss()
+        } label: {
+            Text("退出登录")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.red)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.wikiBg)
+                )
+        }
+        .padding(.horizontal, 16)
+    }
+
     // MARK: - Save
 
     private var saveButton: some View {
@@ -182,65 +232,5 @@ struct SettingsView: View {
                 .background(Capsule().fill(Color.wikiBlue))
         }
         .padding(.horizontal, 16)
-    }
-
-    // MARK: - Avatar Picker Overlay
-
-    private var avatarPickerOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.3)
-                .ignoresSafeArea()
-                .onTapGesture { showAvatarPicker = false }
-
-            VStack(spacing: 0) {
-                HStack {
-                    Text("选择头像")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.wikiText)
-                    Spacer()
-                    Button { showAvatarPicker = false } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.wikiTertiary)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-
-                ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 5), spacing: 14) {
-                        ForEach(1..<71, id: \.self) { seed in
-                            Button {
-                                avatarSeed = seed
-                                showAvatarPicker = false
-                            } label: {
-                                AsyncImage(url: URL(string: "https://i.pravatar.cc/120?img=\(seed)")) { phase in
-                                    if let image = phase.image {
-                                        image.resizable().scaledToFill()
-                                    } else {
-                                        Circle().fill(Color.wikiBgSecondary)
-                                    }
-                                }
-                                .frame(width: 56, height: 56)
-                                .clipShape(Circle())
-                                .overlay(
-                                    Circle()
-                                        .stroke(seed == avatarSeed ? Color.wikiBlue : Color.clear, lineWidth: 3)
-                                )
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
-                }
-            }
-            .frame(maxHeight: 460)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.wikiBg)
-            )
-            .shadow(color: .black.opacity(0.15), radius: 30, y: 10)
-            .padding(.horizontal, 24)
-        }
     }
 }

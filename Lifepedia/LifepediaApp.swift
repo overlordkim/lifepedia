@@ -28,28 +28,33 @@ struct LifepediaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .modelContainer(container)
-                .onAppear {
-                    seedIfNeeded()
-                }
         }
     }
+}
 
-    private func seedIfNeeded() {
-        let context = container.mainContext
-        let count = (try? context.fetchCount(FetchDescriptor<Entry>())) ?? 0
-        if count == 0 {
-            MockEntries.seedAll(in: context)
-            try? context.save()
-            return
+struct RootView: View {
+    @State private var auth = AuthService.shared
+
+    var body: some View {
+        Group {
+            if auth.isLoggedIn {
+                ContentView()
+            } else {
+                LoginView()
+            }
         }
-        // 补种其他用户的词条（可能旧版本没有）
-        let otherUserPred = #Predicate<Entry> { $0.authorId != "self" }
-        let otherCount = (try? context.fetchCount(FetchDescriptor<Entry>(predicate: otherUserPred))) ?? 0
-        if otherCount == 0 {
-            MockEntries.seedOtherUsers(in: context)
-            try? context.save()
+        .animation(.easeInOut(duration: 0.3), value: auth.isLoggedIn)
+        .task {
+            if auth.isLoggedIn {
+                await FollowService.shared.syncFromRemote()
+            }
+        }
+        .onChange(of: auth.isLoggedIn) { _, loggedIn in
+            if loggedIn {
+                Task { await FollowService.shared.syncFromRemote() }
+            }
         }
     }
 }

@@ -9,21 +9,22 @@ struct UserProfileView: View {
     @Query(sort: \Entry.updatedAt, order: .reverse) private var allEntries: [Entry]
     @State private var showFollowingSheet = false
     @State private var showFollowersSheet = false
+    @State private var remoteUser: SimpleUser?
+    @State private var followService = FollowService.shared
 
-    private var followService: FollowService { FollowService.shared }
+    @State private var userFollowingList: [(id: String, name: String)] = []
+    @State private var userFollowerList: [(id: String, name: String)] = []
+    @State private var userBio: String = "用百科的方式，记录人生"
 
-    private var isFollowing: Bool { followService.isFollowing(userName) }
+    private var isFollowing: Bool { followService.isFollowing(userId) }
 
     private var userEntries: [Entry] {
         allEntries.filter { $0.authorId == userId && !$0.isDraft }
     }
 
-    private var avatarSeed: Int {
-        abs(userName.hashValue) % 200
+    private var displayName: String {
+        remoteUser?.displayName ?? followService.displayName(for: userId)
     }
-
-    private var mockFollowing: [String] { followService.followingList.filter { $0 != userName } }
-    private var mockFollowers: [String] { followService.followerNames.filter { $0 != userName } }
 
     var body: some View {
         ScrollView {
@@ -36,16 +37,88 @@ struct UserProfileView: View {
         }
         .background(Color.wikiBg)
         .sheet(isPresented: $showFollowingSheet) {
-            userFollowListSheet(title: "关注", names: mockFollowing, isFollowingList: true)
+            followListSheet(title: "关注", users: userFollowingList, isFollowingList: true)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showFollowersSheet) {
-            userFollowListSheet(title: "被关注", names: mockFollowers, isFollowingList: false)
+            followListSheet(title: "被关注", users: userFollowerList, isFollowingList: false)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .task {
+            await fetchUserProfile()
+            await fetchUserFollows()
+        }
     }
+
+    // MARK: - Data Fetching
+
+    private func fetchUserProfile() async {
+        let query = "id=eq.\(userId)&select=id,display_name,bio,avatar_seed&limit=1"
+        guard let url = URL(string: "\(Secrets.supabaseURL)/rest/v1/users?\(query)") else { return }
+        var req = URLRequest(url: url)
+        req.setValue(Secrets.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return }
+        struct Row: Decodable {
+            let id: String; let displayName: String; let bio: String; let avatarSeed: Int
+            enum CodingKeys: String, CodingKey {
+                case id; case displayName = "display_name"; case bio; case avatarSeed = "avatar_seed"
+            }
+        }
+        guard let rows = try? JSONDecoder().decode([Row].self, from: data), let r = rows.first else { return }
+        await MainActor.run {
+            remoteUser = SimpleUser(id: r.id, displayName: r.displayName, avatarSeed: r.avatarSeed)
+            userBio = r.bio
+        }
+    }
+
+    private func fetchUserFollows() async {
+        async let following = fetchFollowIds(query: "follower_id=eq.\(userId)&select=following_id")
+        async let followers = fetchFollowIds(query: "following_id=eq.\(userId)&select=follower_id")
+        let (fing, fers) = await (following, followers)
+
+        let followingIds = fing.compactMap { $0["following_id"] }
+        let followerIds = fers.compactMap { $0["follower_id"] }
+
+        let allIds = Set(followingIds + followerIds)
+        let profiles = await fetchUserNames(ids: allIds)
+
+        await MainActor.run {
+            userFollowingList = followingIds.map { id in (id: id, name: profiles[id] ?? "…") }
+            userFollowerList = followerIds.map { id in (id: id, name: profiles[id] ?? "…") }
+        }
+    }
+
+    private func fetchFollowIds(query: String) async -> [[String: String]] {
+        guard let url = URL(string: "\(Secrets.supabaseURL)/rest/v1/follows?\(query)") else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(Secrets.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let rows = try? JSONDecoder().decode([[String: String]].self, from: data) else { return [] }
+        return rows
+    }
+
+    private func fetchUserNames(ids: Set<String>) async -> [String: String] {
+        guard !ids.isEmpty else { return [:] }
+        let idList = ids.map { "\"\($0)\"" }.joined(separator: ",")
+        let query = "id=in.(\(idList))&select=id,display_name"
+        guard let url = URL(string: "\(Secrets.supabaseURL)/rest/v1/users?\(query)") else { return [:] }
+        var req = URLRequest(url: url)
+        req.setValue(Secrets.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return [:] }
+        struct Row: Decodable {
+            let id: String; let displayName: String
+            enum CodingKeys: String, CodingKey { case id; case displayName = "display_name" }
+        }
+        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.displayName) })
+    }
+
+    // MARK: - Top Bar
 
     private var topBar: some View {
         HStack(spacing: 12) {
@@ -56,7 +129,7 @@ struct UserProfileView: View {
                     .frame(width: 28, height: 28)
             }
             Spacer()
-            Text(userName)
+            Text(displayName)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.wikiText)
             Spacer()
@@ -71,16 +144,18 @@ struct UserProfileView: View {
         )
     }
 
+    // MARK: - Profile Section
+
     private var profileSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 20) {
-                AsyncImage(url: URL(string: "https://i.pravatar.cc/200?img=\(avatarSeed)")) { phase in
+                AsyncImage(url: Secrets.avatarURL(for: userId)) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
                     } else {
                         Circle().fill(Color.wikiBgSecondary)
                             .overlay(
-                                Text(String(userName.prefix(1)))
+                                Text(String(displayName.prefix(1)))
                                     .font(.system(size: 28, weight: .semibold))
                                     .foregroundColor(.wikiSecondary)
                             )
@@ -91,18 +166,18 @@ struct UserProfileView: View {
 
                 HStack(spacing: 0) {
                     profileStatItem(value: userEntries.count, label: "词条")
-                    profileStatItem(value: mockFollowing.count, label: "关注", action: { showFollowingSheet = true })
-                    profileStatItem(value: mockFollowers.count, label: "被关注", action: { showFollowersSheet = true })
+                    profileStatItem(value: userFollowingList.count, label: "关注", action: { showFollowingSheet = true })
+                    profileStatItem(value: userFollowerList.count, label: "被关注", action: { showFollowersSheet = true })
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(userName)
+                Text(displayName)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.wikiText)
-                Text(bioForUser)
+                Text(userBio)
                     .font(.system(size: 14))
                     .foregroundColor(.wikiSecondary)
             }
@@ -111,7 +186,7 @@ struct UserProfileView: View {
 
             Button {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    followService.toggle(userName)
+                    followService.toggle(userId)
                 }
             } label: {
                 Text(isFollowing ? "已关注" : "关注")
@@ -151,6 +226,8 @@ struct UserProfileView: View {
         .buttonStyle(.plain)
         .allowsHitTesting(action != nil)
     }
+
+    // MARK: - Entries Section
 
     private var entriesSection: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -194,17 +271,11 @@ struct UserProfileView: View {
                 .padding(.bottom, 16)
             }
         }
-        .navigationDestination(for: UUID.self) { entryId in
-            EntryPageView(entryId: entryId)
-                .navigationBarHidden(true)
-        }
-        .navigationDestination(for: UserDestination.self) { dest in
-            UserProfileView(userName: dest.userName, userId: dest.userId)
-                .navigationBarHidden(true)
-        }
     }
 
-    private func userFollowListSheet(title: String, names: [String], isFollowingList: Bool) -> some View {
+    // MARK: - Follow List Sheet
+
+    private func followListSheet(title: String, users: [(id: String, name: String)], isFollowingList: Bool) -> some View {
         VStack(spacing: 0) {
             Text(title)
                 .font(.system(size: 16, weight: .semibold))
@@ -214,7 +285,7 @@ struct UserProfileView: View {
 
             Divider()
 
-            if names.isEmpty {
+            if users.isEmpty {
                 Spacer()
                 VStack(spacing: 10) {
                     Image(systemName: "person.2.slash")
@@ -228,16 +299,15 @@ struct UserProfileView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(names, id: \.self) { name in
+                        ForEach(users, id: \.id) { user in
                             HStack(spacing: 12) {
-                                let seed = abs(name.hashValue) % 70
-                                AsyncImage(url: URL(string: "https://i.pravatar.cc/80?img=\(seed)")) { phase in
+                                AsyncImage(url: Secrets.avatarURL(for: user.id)) { phase in
                                     if let image = phase.image {
                                         image.resizable().scaledToFill()
                                     } else {
                                         Circle().fill(Color.wikiBgSecondary)
                                             .overlay(
-                                                Text(String(name.prefix(1)))
+                                                Text(String(user.name.prefix(1)))
                                                     .font(.system(size: 14, weight: .semibold))
                                                     .foregroundColor(.wikiSecondary)
                                             )
@@ -246,29 +316,25 @@ struct UserProfileView: View {
                                 .frame(width: 48, height: 48)
                                 .clipShape(Circle())
 
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(name)
-                                        .font(.system(size: 15, weight: .medium))
-                                        .foregroundColor(.wikiText)
-                                    Text("用百科的方式，记录人生")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.wikiTertiary)
-                                }
+                                Text(user.name)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.wikiText)
+
                                 Spacer()
 
                                 Button {
                                     withAnimation(.spring(response: 0.3)) {
-                                        followService.toggle(name)
+                                        followService.toggle(user.id)
                                     }
                                 } label: {
-                                    Text(followService.isFollowing(name) ? "已关注" : (isFollowingList ? "关注" : "回关"))
+                                    Text(followService.isFollowing(user.id) ? "已关注" : (isFollowingList ? "关注" : "回关"))
                                         .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(followService.isFollowing(name) ? .wikiSecondary : .white)
+                                        .foregroundColor(followService.isFollowing(user.id) ? .wikiSecondary : .white)
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 6)
                                         .background(
                                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                .fill(followService.isFollowing(name) ? Color.wikiBgSecondary : Color.wikiBlue)
+                                                .fill(followService.isFollowing(user.id) ? Color.wikiBgSecondary : Color.wikiBlue)
                                         )
                                 }
                             }
@@ -281,14 +347,5 @@ struct UserProfileView: View {
             }
         }
         .background(Color.wikiBg)
-    }
-
-    private var bioForUser: String {
-        switch userId {
-        case "yudong":      return "记录那些温暖的人和事"
-        case "linqing":     return "爱记录旧物和老味道"
-        case "chenxiaoyu":  return "我家猫叫大橘"
-        default:            return "用百科的方式，记录人生"
-        }
     }
 }

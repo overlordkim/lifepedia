@@ -43,7 +43,7 @@ final class SupabaseService: @unchecked Sendable {
     // MARK: - 拉取所有已发布词条（Feed 用）
 
     func fetchPublishedEntries() async throws -> [SupabaseEntry] {
-        let url = URL(string: "\(restURL)/entries?status=eq.published&order=created_at.desc&limit=50")!
+        let url = URL(string: "\(restURL)/entries?status=eq.published&order=created_at.desc&limit=200")!
         var request = URLRequest(url: url)
         for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }
         let (data, response) = try await session.data(for: request)
@@ -69,6 +69,22 @@ final class SupabaseService: @unchecked Sendable {
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             let msg = String(data: data, encoding: .utf8) ?? ""
             throw SupabaseError.requestFailed(msg)
+        }
+    }
+
+    // MARK: - 更新合编者列表
+
+    func updateCollaborators(entryId: UUID, names: [String]) async throws {
+        let url = URL(string: "\(restURL)/entries?id=eq.\(entryId.uuidString)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        let payload = try encoder.encode(["contributor_names": names])
+        request.httpBody = payload
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            throw SupabaseError.requestFailed(String(data: data, encoding: .utf8) ?? "")
         }
     }
 
@@ -144,8 +160,10 @@ final class SupabaseService: @unchecked Sendable {
 
     // MARK: - 同步：把远程数据合并到本地 SwiftData
 
-    func syncToLocal(remoteEntries: [SupabaseEntry], localEntries: [Entry], insert: (Entry) -> Void) {
+    func syncToLocal(remoteEntries: [SupabaseEntry], localEntries: [Entry], insert: (Entry) -> Void, delete: ((Entry) -> Void)? = nil) {
+        let remoteIds = Set(remoteEntries.map(\.id))
         let localIds = Set(localEntries.map(\.id))
+
         for remote in remoteEntries {
             if localIds.contains(remote.id) {
                 if let local = localEntries.first(where: { $0.id == remote.id }) {
@@ -154,6 +172,15 @@ final class SupabaseService: @unchecked Sendable {
             } else {
                 let newEntry = remote.toEntry()
                 insert(newEntry)
+            }
+        }
+
+        if let delete = delete {
+            let myId = AuthService.shared.currentUser?.id ?? "self"
+            for local in localEntries {
+                if !remoteIds.contains(local.id) && local.authorId != myId {
+                    delete(local)
+                }
             }
         }
     }
@@ -249,23 +276,22 @@ struct SupabaseEntry: Codable {
 
     /// 把远程数据更新到已有的本地 Entry
     func apply(to entry: Entry) {
-        if updatedAt > entry.updatedAt {
-            entry.title = title
-            entry.subtitle = subtitle
-            entry.categoryRaw = category
-            entry.scopeRaw = scope
-            entry.infobox = InfoboxData(fields: (infobox ?? []).map { InfoboxField(key: $0.key, value: $0.value) })
-            entry.introductionText = introduction
-            entry.sections = (sections ?? []).map { EntrySection(title: $0.title, body: $0.body, imageRefs: $0.imageRefs ?? []) }
-            entry.tags = tags
-            entry.coverImageURL = coverImageUrl
-            entry.authorName = authorName
-            entry.likeCount = likeCount
-            entry.collectCount = collectCount
-            entry.commentCount = commentCount
-            entry.viewCount = viewCount
-            entry.updatedAt = updatedAt
-        }
+        entry.title = title
+        entry.subtitle = subtitle
+        entry.categoryRaw = category
+        entry.scopeRaw = scope
+        entry.infobox = InfoboxData(fields: (infobox ?? []).map { InfoboxField(key: $0.key, value: $0.value) })
+        entry.introductionText = introduction
+        entry.sections = (sections ?? []).map { EntrySection(title: $0.title, body: $0.body, imageRefs: $0.imageRefs ?? []) }
+        entry.tags = tags
+        entry.coverImageURL = coverImageUrl
+        entry.authorName = authorName
+        entry.authorId = authorId
+        entry.likeCount = likeCount
+        entry.collectCount = collectCount
+        entry.commentCount = commentCount
+        entry.viewCount = viewCount
+        entry.updatedAt = updatedAt
     }
 }
 
