@@ -347,13 +347,16 @@ async function renderCard(html, port, retries = 2) {
   const cardUrl = `http://127.0.0.1:${port}/api/_card/${token}`
   let lastErr
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const t = Date.now()
+    const ms = () => `${Date.now() - t}ms`
     let page
     try {
       const b = await getBrowser()
+      console.log(`  [render#${attempt+1}] getBrowser ${ms()}`)
       page = await b.newPage()
       await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
       await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-      // 字体从 localhost 加载，等待字体 + 图片（各自最多 6 秒）
+      console.log(`  [render#${attempt+1}] goto ${ms()}`)
       await Promise.all([
         Promise.race([
           page.evaluate(() => document.fonts.ready),
@@ -371,17 +374,18 @@ async function renderCard(html, port, retries = 2) {
           new Promise(r => setTimeout(r, 5000)),
         ]),
       ])
+      console.log(`  [render#${attempt+1}] 字体+图片 ${ms()}`)
       await new Promise(r => setTimeout(r, 200))
       const card = await page.$('.card')
       if (!card) throw new Error('.card element not found')
       const screenshot = await card.screenshot({ type: 'png', omitBackground: false })
+      console.log(`  [render#${attempt+1}] screenshot ${ms()}`)
       await page.close().catch(() => {})
       return screenshot
     } catch (err) {
       lastErr = err
-      console.error(`render attempt ${attempt + 1} failed:`, err.message)
+      console.error(`  [render#${attempt+1}] 失败 ${ms()}:`, err.message)
       if (page) await page.close().catch(() => {})
-      // 浏览器崩溃时强制重建
       if (browser && !browser.connected) { try { await browser.close() } catch {} browser = null }
       if (attempt < retries) await new Promise(r => setTimeout(r, 1200 * (attempt + 1)))
     }
@@ -415,21 +419,26 @@ app.post('/api/render-share', (req, res) => {
 
   // 后台执行，不阻塞响应
   ;(async () => {
+    const t0 = Date.now()
+    const elapsed = () => `+${((Date.now() - t0) / 1000).toFixed(1)}s`
+    console.log(`[${jobId}] 开始生成`)
     try {
       const entryURL = 'https://overlordkim.github.io/lifepedia-redirect/'
       const qrDataURL = await QRCode.toDataURL(entryURL, {
         width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
       })
+      console.log(`[${jobId}] QR 生成完 ${elapsed()}`)
       const html = buildCardHTML(entry, qrDataURL)
+      console.log(`[${jobId}] HTML 生成完 ${elapsed()}`)
       const screenshot = await renderCard(html, PORT)
+      console.log(`[${jobId}] 截图完 ${elapsed()} (${Math.round(screenshot.length/1024)}KB)`)
       const url = await uploadShareImage(screenshot)
+      console.log(`[${jobId}] 上传完 ${elapsed()} → ${url}`)
       renderJobs.set(jobId, { status: 'done', url })
-      console.log('render-share done:', jobId, url)
     } catch (err) {
-      console.error('render-share error:', jobId, err.message)
+      console.error(`[${jobId}] 失败 ${elapsed()} →`, err.message)
       renderJobs.set(jobId, { status: 'error', error: err.message })
     }
-    // 10 分钟后自动清理
     setTimeout(() => renderJobs.delete(jobId), 10 * 60 * 1000)
   })()
 })
