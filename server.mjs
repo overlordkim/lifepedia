@@ -288,13 +288,9 @@ function buildCardHTML(entry, qrDataURL) {
 </body></html>`
 }
 
-// Puppeteer 浏览器实例（进程级复用，断线自动重建）
-let browser = null
-
-async function getBrowser() {
-  if (browser && browser.connected) return browser
-  if (browser) { try { await browser.close() } catch {} browser = null }
-  browser = await puppeteer.launch({
+// 低配服务器稳定优先：每次任务单独启动一个浏览器进程
+async function launchBrowser() {
+  return puppeteer.launch({
     headless: true,
     args: [
       '--no-sandbox',
@@ -303,10 +299,11 @@ async function getBrowser() {
       '--disable-gpu',
       '--no-first-run',
       '--no-zygote',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-sync',
     ],
   })
-  browser.on('disconnected', () => { browser = null })
-  return browser
 }
 
 // 带自动重试的截图函数
@@ -315,12 +312,13 @@ async function renderCard(html, retries = 2) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     const t = Date.now()
     const ms = () => `${Date.now() - t}ms`
+    let browser
     let page
     try {
-      const b = await getBrowser()
-      console.log(`  [render#${attempt+1}] getBrowser ${ms()}`)
-      page = await b.newPage()
-      await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
+      browser = await launchBrowser()
+      console.log(`  [render#${attempt+1}] launchBrowser ${ms()}`)
+      page = await browser.newPage()
+      await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 2 })
       // 直接注入 HTML，避免走 /api/_card HTTP 导航引发 timeout
       await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 45000 })
       console.log(`  [render#${attempt+1}] setContent ${ms()}`)
@@ -348,12 +346,13 @@ async function renderCard(html, retries = 2) {
       const screenshot = await card.screenshot({ type: 'png', omitBackground: false })
       console.log(`  [render#${attempt+1}] screenshot ${ms()}`)
       await page.close().catch(() => {})
+      await browser.close().catch(() => {})
       return screenshot
     } catch (err) {
       lastErr = err
       console.error(`  [render#${attempt+1}] 失败 ${ms()}:`, err.message)
       if (page) await page.close().catch(() => {})
-      if (browser && !browser.connected) { try { await browser.close() } catch {} browser = null }
+      if (browser) await browser.close().catch(() => {})
       if (attempt < retries) await new Promise(r => setTimeout(r, 1200 * (attempt + 1)))
     }
   }
@@ -401,7 +400,4 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://localhost:${PORT}`)
 })
 
-process.on('SIGINT', async () => {
-  if (browser) await browser.close()
-  process.exit(0)
-})
+process.on('SIGINT', async () => process.exit(0))
