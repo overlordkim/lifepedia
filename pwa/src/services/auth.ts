@@ -35,3 +35,27 @@ export async function login(username: string, password: string): Promise<UserPro
   storeUser(user)
   return user
 }
+
+export async function register(username: string, password: string): Promise<UserProfile> {
+  const existing = await supabaseGet<{ id: string }[]>(
+    `users?username=eq.${encodeURIComponent(username)}&select=id&limit=1`
+  )
+  if (existing.length) throw new Error('该用户名已被注册')
+
+  const hash = sha256(password)
+  const id = crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+  const avatarSeed = Math.floor(Math.random() * 100)
+
+  const rows = await supabasePost<UserProfile[]>('users', {
+    id,
+    username,
+    password_hash: hash,
+    display_name: username,
+    bio: '',
+    avatar_seed: avatarSeed,
+  })
+
+  const user = rows[0]
+  storeUser(user)
+  return user
+}

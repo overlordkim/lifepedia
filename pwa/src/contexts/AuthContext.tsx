@@ -1,11 +1,12 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import type { UserProfile } from '../types'
-import { getStoredUser, storeUser, clearUser, login as doLogin } from '../services/auth'
+import { getStoredUser, storeUser, clearUser, login as doLogin, register as doRegister } from '../services/auth'
 
 interface AuthCtx {
   user: UserProfile | null
   isLoggedIn: boolean
   login: (username: string, password: string) => Promise<void>
+  register: (username: string, password: string) => Promise<void>
   logout: () => void
   updateLocalProfile: (patch: Partial<Pick<UserProfile, 'display_name' | 'bio'>>) => void
 }
@@ -17,6 +18,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const u = await doLogin(username, password)
+    setUser(u)
+  }, [])
+
+  const register = useCallback(async (username: string, password: string) => {
+    const u = await doRegister(username, password)
     setUser(u)
   }, [])
 
@@ -35,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, isLoggedIn: !!user, login, logout, updateLocalProfile }}>
+    <AuthContext.Provider value={{ user, isLoggedIn: !!user, login, register, logout, updateLocalProfile }}>
       {children}
     </AuthContext.Provider>
   )

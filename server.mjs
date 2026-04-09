@@ -1,5 +1,6 @@
 import express from 'express'
 import puppeteer from 'puppeteer'
+import QRCode from 'qrcode'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -48,7 +49,7 @@ function renderWiki(text) {
     .replace(/\[来源请求\]/g, '<sup class="wk-src">[来源请求]</sup>')
 }
 
-function buildCardHTML(entry) {
+function buildCardHTML(entry, qrDataURL) {
   const catMeta = CATEGORY_META[entry.category] || { label: entry.category, emoji: '📝' }
   const scpMeta = SCOPE_META[entry.scope] || { label: entry.scope, emoji: '🌐' }
   const coverUrl = entry.cover_image_url || (entry.sections || []).find(s => s.image_refs?.length)?.image_refs?.[0] || ''
@@ -62,10 +63,12 @@ function buildCardHTML(entry) {
     ? `<div class="infobox">
         <div class="infobox-header">${catMeta.emoji} ${escHtml(catMeta.label)}</div>
         ${entry.infobox.map((f, i) => `
-          <div class="infobox-row${i > 0 ? ' has-border' : ''}">
+          ${i > 0 ? '<div class="infobox-sep"></div>' : ''}
+          <div class="infobox-row">
             <span class="infobox-key">${escHtml(f.key)}</span>
             <span class="infobox-val">${renderWiki(f.value)}</span>
           </div>`).join('')}
+        <div class="infobox-bottom"></div>
       </div>`
     : ''
 
@@ -139,29 +142,32 @@ function buildCardHTML(entry) {
   }
 
   .infobox {
-    margin-top: 16px; border-radius: 10px;
-    background: #FAFAFA; border: 0.5px solid #EEE;
-    padding: 10px 14px;
+    margin-top: 16px; border-radius: 6px;
+    background: #FCFCFC; border: 0.5px solid #F0F0F0;
+    overflow: hidden;
   }
   .infobox-header {
-    font-size: 13px; font-weight: 600; color: #2563EB;
-    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 14px;
+    font-size: 13px; font-weight: 600; color: #1A1A1A;
+  }
+  .infobox-sep {
+    height: 1px; background: rgba(224,224,224,0.5);
+    margin-left: 106px; margin-right: 14px;
   }
   .infobox-row {
     display: flex; align-items: flex-start;
-    padding: 6px 0;
-  }
-  .infobox-row.has-border {
-    border-top: 0.5px solid rgba(0,0,0,0.06);
+    padding: 5px 14px;
   }
   .infobox-key {
-    width: 68px; flex-shrink: 0; text-align: right;
+    width: 80px; flex-shrink: 0; text-align: right;
     font-size: 12px; font-weight: 500; color: #999;
-    margin-right: 12px; padding-top: 1px;
+    padding-right: 12px; padding-top: 1px;
   }
   .infobox-val {
     flex: 1; font-size: 13px; color: #1A1A1A; line-height: 1.55;
   }
+  .infobox-bottom { height: 10px; }
 
   .intro {
     margin-top: 16px; font-size: 15px; color: #1A1A1A; line-height: 1.8;
@@ -193,22 +199,30 @@ function buildCardHTML(entry) {
 
   .footer {
     margin-top: 28px; border-top: 1px solid #E5E5E5;
-    padding: 28px 0 28px;
-    text-align: center;
+    padding: 24px 20px;
+    display: flex; align-items: center; justify-content: space-between;
   }
-  .footer-logo { width: 44px; height: 44px; display: block; margin: 0 auto 10px; }
+  .footer-left {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .footer-logo { width: 40px; height: 40px; flex-shrink: 0; }
+  .footer-text { display: flex; flex-direction: column; }
   .footer-brand {
-    display: flex; align-items: baseline; justify-content: center; gap: 6px;
+    display: flex; align-items: baseline; gap: 5px;
   }
   .footer-brand-en {
     font-family: Georgia, "Times New Roman", serif;
-    font-size: 18px; font-weight: bold; font-style: italic; color: #1A1A1A;
+    font-size: 16px; font-weight: bold; font-style: italic; color: #1A1A1A;
   }
   .footer-brand-cn {
-    font-size: 15px; font-weight: 600; color: #1A1A1A;
+    font-size: 13px; font-weight: 600; color: #1A1A1A;
   }
   .footer-slogan {
-    font-size: 12px; color: #999; margin-top: 4px;
+    font-size: 11px; color: #999; margin-top: 2px;
+  }
+  .footer-qr {
+    width: 64px; height: 64px; flex-shrink: 0;
+    border-radius: 4px;
   }
 
   .wk-blue { color: #2563EB; text-decoration: underline; text-underline-offset: 2px; }
@@ -237,12 +251,17 @@ function buildCardHTML(entry) {
     ${tagsBlock}
   </div>
   <div class="footer">
-    ${logoBase64 ? `<img class="footer-logo" src="${logoBase64}" />` : ''}
-    <div class="footer-brand">
-      <span class="footer-brand-en">Lifepedia</span>
-      <span class="footer-brand-cn">人间词条</span>
+    <div class="footer-left">
+      ${logoBase64 ? `<img class="footer-logo" src="${logoBase64}" />` : ''}
+      <div class="footer-text">
+        <div class="footer-brand">
+          <span class="footer-brand-en">Lifepedia</span>
+          <span class="footer-brand-cn">人间词条</span>
+        </div>
+        <div class="footer-slogan">你的生命值得一座百科</div>
+      </div>
     </div>
-    <div class="footer-slogan">你的生命值得一座百科</div>
+    ${qrDataURL ? `<img class="footer-qr" src="${qrDataURL}" />` : ''}
   </div>
 </div>
 </body></html>`
@@ -278,7 +297,11 @@ app.post('/api/render-share', async (req, res) => {
   const token = Math.random().toString(36).slice(2)
   let page
   try {
-    const html = buildCardHTML(entry)
+    const entryURL = 'https://lifepedia.a.pinggy.link'
+    const qrDataURL = await QRCode.toDataURL(entryURL, {
+      width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
+    })
+    const html = buildCardHTML(entry, qrDataURL)
     pendingCards.set(token, html)
 
     const b = await getBrowser()

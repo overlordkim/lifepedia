@@ -57,3 +57,6 @@ scripts/output/
 # Test files
 test.jpg
 logo.jpeg
+
+# Generated assets
+qr_lifepedia.png
