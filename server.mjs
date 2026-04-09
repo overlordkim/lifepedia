@@ -71,8 +71,8 @@ function renderWiki(text) {
 }
 
 function buildCardHTML(entry, qrDataURL) {
-  const catMeta = CATEGORY_META[entry.category] || { label: entry.category, emoji: '📝' }
-  const scpMeta = SCOPE_META[entry.scope] || { label: entry.scope, emoji: '🌐' }
+  const catMeta = CATEGORY_META[entry.category] || { label: entry.category }
+  const scpMeta = SCOPE_META[entry.scope] || { label: entry.scope }
   const coverUrl = entry.cover_image_url || (entry.sections || []).find(s => s.image_refs?.length)?.image_refs?.[0] || ''
   const avUrl = avatarURL(entry.author_id)
 
