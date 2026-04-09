@@ -124,6 +124,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   ${fontBase64 ? `@font-face {
     font-family: 'WQY';
@@ -133,7 +135,7 @@ function buildCardHTML(entry, qrDataURL) {
   }` : ''}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: ${fontBase64 ? "'WQY'," : ''} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: 'Noto Sans SC', ${fontBase64 ? "'WQY'," : ''} -apple-system, BlinkMacSystemFont, sans-serif;
     background: #fff;
     width: 375px;
   }
@@ -162,8 +164,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .content { padding: 20px 16px 0; }
   .title {
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 24px; font-weight: bold; color: #1A1A1A; line-height: 1.35;
+    font-family: 'Noto Serif SC', Georgia, "Times New Roman", serif;
+    font-size: 24px; font-weight: 700; color: #1A1A1A; line-height: 1.35;
   }
   .subtitle {
     font-size: 14px; color: #666; margin-top: 4px; line-height: 1.45;
@@ -209,8 +211,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .section { margin-top: 24px; }
   .sec-title {
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 18px; font-weight: bold; color: #1A1A1A; line-height: 1.45;
+    font-family: 'Noto Serif SC', Georgia, "Times New Roman", serif;
+    font-size: 18px; font-weight: 600; color: #1A1A1A; line-height: 1.45;
   }
   .sec-divider { height: 1px; background: #E5E5E5; margin-top: 2px; }
   .sec-body {
@@ -245,7 +247,7 @@ function buildCardHTML(entry, qrDataURL) {
     display: flex; align-items: baseline; gap: 5px;
   }
   .footer-brand-en {
-    font-family: Georgia, "Times New Roman", serif;
+    font-family: 'Noto Serif SC', Georgia, "Times New Roman", serif;
     font-size: 16px; font-weight: bold; font-style: italic; color: #1A1A1A;
   }
   .footer-brand-cn {
@@ -337,7 +339,11 @@ async function renderCard(html, port, retries = 2) {
       await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
       // domcontentloaded：不等外部图片，避免因图片加载慢/失败而超时
       await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-      // 等图片（成功或失败都结束），最多等 6 秒
+      // 等字体 + 图片并行加载，各自最多等 8 秒
+      await Promise.race([
+        page.evaluate(() => document.fonts.ready),
+        new Promise(r => setTimeout(r, 8000)),
+      ])
       await Promise.race([
         page.evaluate(() =>
           Promise.all(
