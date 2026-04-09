@@ -7,16 +7,22 @@ set -e
 
 echo "=== [1/5] 安装 Puppeteer/Chromium 所需系统依赖（Linux only）==="
 if command -v apt-get &>/dev/null; then
-  sudo apt-get install -y \
+  sudo apt-get update -qq
+  sudo apt-get install -y --fix-missing \
     libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
     libxrandr2 libgbm1 libpango-1.0-0 libpangocairo-1.0-0 \
     libcairo2 libatspi2.0-0 libgtk-3-0 libnss3 libnspr4 \
     libxss1 libx11-xcb1 libxcb1 libfontconfig1 libglib2.0-0 \
     fonts-liberation xdg-utils wget ca-certificates 2>/dev/null || true
-  # Ubuntu 22.04+ 改名为 libasound2t64
-  sudo apt-get install -y libasound2 2>/dev/null || \
-    sudo apt-get install -y libasound2t64 2>/dev/null || true
+  # Ubuntu 22.04+ 改名为 libasound2t64；用 dpkg 强制安装绕开 alsa-ucm-conf 404
+  if ! ldconfig -p | grep -q libasound.so.2; then
+    (cd /tmp && sudo apt-get download libasound2-data alsa-topology-conf libasound2t64 2>/dev/null && \
+     sudo dpkg -i --force-depends libasound2-data_*.deb alsa-topology-conf_*.deb libasound2t64_*.deb 2>/dev/null) || true
+  fi
+  # 中文字体（避免 Chromium 截图中文显示为方块）
+  sudo apt-get install -y --fix-missing fonts-noto-cjk 2>/dev/null || true
+  fc-cache -f 2>/dev/null || true
 else
   echo "  非 apt 系统，跳过系统依赖安装"
 fi
