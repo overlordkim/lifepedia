@@ -5,16 +5,32 @@
 
 set -e
 
-echo "=== [1/4] 安装根目录依赖（express / puppeteer / qrcode）==="
+echo "=== [1/5] 安装 Puppeteer/Chromium 所需系统依赖（Linux only）==="
+if command -v apt-get &>/dev/null; then
+  sudo apt-get install -y \
+    libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+    libxrandr2 libgbm1 libpango-1.0-0 libpangocairo-1.0-0 \
+    libcairo2 libatspi2.0-0 libgtk-3-0 libnss3 libnspr4 \
+    libxss1 libx11-xcb1 libxcb1 libfontconfig1 libglib2.0-0 \
+    fonts-liberation xdg-utils wget ca-certificates 2>/dev/null || true
+  # Ubuntu 22.04+ 改名为 libasound2t64
+  sudo apt-get install -y libasound2 2>/dev/null || \
+    sudo apt-get install -y libasound2t64 2>/dev/null || true
+else
+  echo "  非 apt 系统，跳过系统依赖安装"
+fi
+
+echo "=== [2/5] 安装根目录依赖（express / puppeteer / qrcode）==="
 npm install
 
-echo "=== [2/4] 安装 PWA 前端依赖 ==="
+echo "=== [3/5] 安装 PWA 前端依赖 ==="
 cd pwa && npm install && cd ..
 
-echo "=== [3/4] 构建前端（输出到 pwa/dist/）==="
+echo "=== [4/5] 构建前端（输出到 pwa/dist/）==="
 cd pwa && npm run build && cd ..
 
-echo "=== [4/4] 重启服务器 ==="
+echo "=== [5/5] 重启服务器 ==="
 # 停掉旧进程（如果有）
 lsof -ti:17497 | xargs kill -9 2>/dev/null || true
 
