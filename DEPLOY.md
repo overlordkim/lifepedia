@@ -80,18 +80,66 @@ node server.mjs
 
 Pinggy 是一个 SSH 隧道服务，适合开发/演示用途。
 
+### 5.1 前台运行（调试用）
+
 ```bash
-# 格式：ssh -p 443 -R0:localhost:<本地端口> <TOKEN>+<自定义域名>@a.pinggy.io
 ssh -p 443 -R0:localhost:17497 \
   -o StrictHostKeyChecking=no \
   -o ServerAliveInterval=30 \
   "rj9j1gZuYVx+lifepedia.a.pinggy.link@a.pinggy.io"
 ```
 
+### 5.2 后台持久运行（nohup，推荐）
+
+```bash
+nohup ssh -p 443 -R0:localhost:17497 \
+  -o StrictHostKeyChecking=no \
+  -o ServerAliveInterval=30 \
+  -o ExitOnForwardFailure=yes \
+  "rj9j1gZuYVx+lifepedia.a.pinggy.link@a.pinggy.io" \
+  > /tmp/pinggy.log 2>&1 &
+
+echo "Pinggy PID: $!"
+```
+
+- 日志写到 `/tmp/pinggy.log`，可用 `tail -f /tmp/pinggy.log` 查看状态
+- 关闭终端/SSH 会话后进程仍然存活
+
+### 5.3 停止 Pinggy
+
+```bash
+# 方式一：通过 PID（启动时记录的）
+kill <PID>
+
+# 方式二：按进程名查找并终止
+ps aux | grep "pinggy.io" | grep -v grep | awk '{print $2}' | xargs kill
+```
+
+### 5.4 自动重连（断线后自动恢复）
+
+Pinggy 免费隧道会不定时断开。用 `while` 循环配合 `nohup` 实现断线重连：
+
+```bash
+nohup bash -c '
+while true; do
+  echo "[$(date)] Connecting to Pinggy..."
+  ssh -p 443 -R0:localhost:17497 \
+    -o StrictHostKeyChecking=no \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    "rj9j1gZuYVx+lifepedia.a.pinggy.link@a.pinggy.io"
+  echo "[$(date)] Disconnected, retrying in 5s..."
+  sleep 5
+done
+' > /tmp/pinggy.log 2>&1 &
+
+echo "Pinggy auto-reconnect PID: $!"
+```
+
 成功后访问：`https://lifepedia.a.pinggy.link`
 
 **注意**：
-- Pinggy 免费隧道会不定时断开，需要手动重连
 - 每次重连后 HTTPS URL 不变（固定域名已绑定）
 - 若迁移到正式服务器（有公网 IP），直接通过 Nginx/反向代理暴露，无需 Pinggy
 
