@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, X, Bell, ChevronDown } from 'lucide-react'
 import { fetchPublishedEntriesPage, searchEntries } from '../services/entries'
@@ -25,19 +25,27 @@ function seededHash(s: string, seed: number): number {
   return h >>> 0
 }
 
+const PULL_THRESHOLD = 64  // px，下拉多少触发刷新
+
 export default function FeedPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  // session 级随机种子：每次打开页面重新生成，刷新后顺序不同
-  const [shuffleSeed] = useState(() => Math.floor(Math.random() * 1e9))
+  // session 级随机种子，下拉刷新时重新生成 → 顺序变化
+  const [shuffleSeed, setShuffleSeed] = useState(() => Math.floor(Math.random() * 1e9))
 
   // ── 分页加载 ──
-  const [entryPool, setEntryPool] = useState<SupabaseEntry[]>([])  // 原始拉取池
+  const [entryPool, setEntryPool] = useState<SupabaseEntry[]>([])
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
+
+  // ── 下拉刷新 ──
+  const [pullY, setPullY] = useState(0)          // 当前下拉距离
+  const [refreshing, setRefreshing] = useState(false)
+  const touchStartY = useRef(0)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
   // ── 搜索 ──
   const [selectedCat, setSelectedCat] = useState<EntryCategory | null>(null)
@@ -55,18 +63,53 @@ export default function FeedPage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const observerRef = useRef<IntersectionObserver | null>(null)
 
-  // 初始加载第一页
+  // 加载第一页（或刷新时重置）
+  const loadFirstPage = useCallback(async () => {
+    const rows = await fetchPublishedEntriesPage(0, PAGE_SIZE)
+    setEntryPool(rows)
+    setOffset(PAGE_SIZE)
+    setHasMore(rows.length === PAGE_SIZE)
+  }, [])
+
+  // 初始加载
   useEffect(() => {
-    fetchPublishedEntriesPage(0, PAGE_SIZE)
-      .then(rows => {
-        setEntryPool(rows)
-        setOffset(PAGE_SIZE)
-        setHasMore(rows.length === PAGE_SIZE)
-      })
-      .catch(console.error)
-      .finally(() => setInitialLoading(false))
+    loadFirstPage().catch(console.error).finally(() => setInitialLoading(false))
     if (user) loadFollowing(user.id).then(ids => setFollowingIds(new Set(ids))).catch(() => {})
-  }, [user])
+  }, [user, loadFirstPage])
+
+  // 下拉刷新逻辑
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (scrollRef.current && scrollRef.current.scrollTop === 0) {
+      touchStartY.current = e.touches[0].clientY
+    } else {
+      touchStartY.current = 0
+    }
+  }, [])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchStartY.current || refreshing) return
+    const dy = e.touches[0].clientY - touchStartY.current
+    if (dy > 0 && scrollRef.current?.scrollTop === 0) {
+      // 阻尼效果：拉得越多，增量越小
+      setPullY(Math.min(dy * 0.45, PULL_THRESHOLD + 16))
+    }
+  }, [refreshing])
+
+  const handleTouchEnd = useCallback(async () => {
+    if (pullY >= PULL_THRESHOLD && !refreshing) {
+      setRefreshing(true)
+      setPullY(0)
+      try {
+        setShuffleSeed(Math.floor(Math.random() * 1e9))  // 新种子 → 新顺序
+        await loadFirstPage()
+      } finally {
+        setRefreshing(false)
+      }
+    } else {
+      setPullY(0)
+    }
+    touchStartY.current = 0
+  }, [pullY, refreshing, loadFirstPage])
 
   // 加载下一页
   const loadMore = useCallback(async () => {
@@ -113,10 +156,13 @@ export default function FeedPage() {
 
   // 当前显示的词条列表（非搜索时用 seed 随机排序）
   const isSearching = !!searchText.trim()
-  let displayEntries = isSearching
-    ? searchResults
-    : [...entryPool].sort((a, b) => seededHash(a.id, shuffleSeed) - seededHash(b.id, shuffleSeed))
-  if (selectedCat) displayEntries = displayEntries.filter(e => e.category === selectedCat)
+  const displayEntries = useMemo(() => {
+    let list = isSearching
+      ? searchResults
+      : [...entryPool].sort((a, b) => seededHash(a.id, shuffleSeed) - seededHash(b.id, shuffleSeed))
+    if (selectedCat) list = list.filter(e => e.category === selectedCat)
+    return list
+  }, [isSearching, searchResults, entryPool, shuffleSeed, selectedCat])
 
   // 搜索到的用户（从搜索结果里聚合）
   const matchedUsers = (() => {
@@ -211,7 +257,27 @@ export default function FeedPage() {
       <CategoryFilterBar selected={selectedCat} onSelect={setSelectedCat} />
 
       {/* 内容 */}
-      <div className="flex-1 overflow-y-auto bg-[#F4F4F4] pb-20">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto bg-[#F4F4F4] pb-20"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* 下拉刷新指示器 */}
+        <div
+          className="flex items-center justify-center overflow-hidden transition-all duration-200"
+          style={{ height: refreshing ? 48 : pullY > 0 ? pullY : 0 }}
+        >
+          {refreshing ? (
+            <span className="w-5 h-5 border-2 border-wiki-border border-t-wiki-blue rounded-full animate-spin" />
+          ) : pullY >= PULL_THRESHOLD ? (
+            <span className="text-[12px] text-wiki-blue font-medium">松开刷新</span>
+          ) : pullY > 10 ? (
+            <span className="text-[12px] text-wiki-tertiary">下拉刷新</span>
+          ) : null}
+        </div>
+
         <div className="px-2.5 pt-1.5 space-y-3">
 
           {/* 搜索匹配用户 */}
@@ -276,7 +342,7 @@ export default function FeedPage() {
               {loadingMore && (
                 <span className="w-6 h-6 border-2 border-wiki-border border-t-wiki-blue rounded-full animate-spin" />
               )}
-              {!hasMore && entries.length > 0 && (
+              {!hasMore && entryPool.length > 0 && (
                 <p className="text-[12px] text-wiki-tertiary">— 已加载全部词条 —</p>
               )}
             </div>
