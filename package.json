@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/overlordkim/lifepedia#readme",
   "dependencies": {
+    "@fontsource/noto-serif-sc": "^5.2.9",
     "express": "^5.2.1",
     "puppeteer": "^24.40.0",
     "qrcode": "^1.5.4"

@@ -41,27 +41,40 @@ const logoBase64 = (() => {
   return ''
 })()
 
-// 内嵌中文字体，不依赖服务器系统字体
+// WQY 内嵌兜底字体（保证中文不乱码）
 const fontBase64 = (() => {
   const p = path.join(__dirname, 'fonts', 'wqy-microhei.ttc')
   if (fs.existsSync(p)) return 'data:font/ttc;base64,' + fs.readFileSync(p).toString('base64')
   return ''
 })()
 
+// Noto Serif SC 字体 CSS（从 node_modules 读取，URL 替换为本地服务器路径）
+const serifFontCSS = (() => {
+  const cssPath = path.join(__dirname, 'node_modules/@fontsource/noto-serif-sc/700.css')
+  const css400Path = path.join(__dirname, 'node_modules/@fontsource/noto-serif-sc/400.css')
+  const base = `http://127.0.0.1:${PORT}/card-fonts/files/`
+  let css = ''
+  if (fs.existsSync(cssPath))
+    css += fs.readFileSync(cssPath, 'utf-8').replace(/url\(\.\/files\//g, `url(${base}`)
+  if (fs.existsSync(css400Path))
+    css += fs.readFileSync(css400Path, 'utf-8').replace(/url\(\.\/files\//g, `url(${base}`)
+  return css
+})()
+
 const CATEGORY_META = {
-  person:    { label: '人物', emoji: '👤' },
-  place:     { label: '栖居', emoji: '🏠' },
-  companion: { label: '相伴', emoji: '🐾' },
-  taste:     { label: '滋味', emoji: '🍜' },
-  keepsake:  { label: '旧物', emoji: '📦' },
-  moment:    { label: '际遇', emoji: '⚡' },
-  era:       { label: '流年', emoji: '⏳' },
+  person:    { label: '人物' },
+  place:     { label: '栖居' },
+  companion: { label: '相伴' },
+  taste:     { label: '滋味' },
+  keepsake:  { label: '旧物' },
+  moment:    { label: '际遇' },
+  era:       { label: '流年' },
 }
 
 const SCOPE_META = {
-  private:       { label: '私人', emoji: '🔒' },
-  collaborative: { label: '合编', emoji: '👥' },
-  public:        { label: '公共', emoji: '🌐' },
+  private:       { label: '私人' },
+  collaborative: { label: '合编' },
+  public:        { label: '公共' },
 }
 
 function escHtml(s) {
@@ -89,7 +102,7 @@ function buildCardHTML(entry, qrDataURL) {
 
   const infoboxBlock = (entry.infobox && entry.infobox.length)
     ? `<div class="infobox">
-        <div class="infobox-header">${catMeta.emoji} ${escHtml(catMeta.label)}</div>
+        <div class="infobox-header">${escHtml(catMeta.label)}</div>
         ${entry.infobox.map((f, i) => `
           ${i > 0 ? '<div class="infobox-sep"></div>' : ''}
           <div class="infobox-row">
@@ -125,6 +138,7 @@ function buildCardHTML(entry, qrDataURL) {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
+  ${serifFontCSS}
   ${fontBase64 ? `@font-face {
     font-family: 'WQY';
     src: url('${fontBase64}') format('truetype');
@@ -133,7 +147,7 @@ function buildCardHTML(entry, qrDataURL) {
   }` : ''}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: ${fontBase64 ? "'WQY'," : ''} -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Noto Serif SC', ${fontBase64 ? "'WQY'," : ''} sans-serif;
     background: #fff;
     width: 375px;
   }
@@ -162,8 +176,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .content { padding: 20px 16px 0; }
   .title {
-    font-family: 'WQY', Georgia, serif;
-    font-size: 24px; font-weight: bold; color: #1A1A1A; line-height: 1.35;
+    font-family: 'Noto Serif SC', 'WQY', serif;
+    font-size: 24px; font-weight: 700; color: #1A1A1A; line-height: 1.35;
   }
   .subtitle {
     font-size: 14px; color: #666; margin-top: 4px; line-height: 1.45;
@@ -209,8 +223,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .section { margin-top: 24px; }
   .sec-title {
-    font-family: 'WQY', Georgia, serif;
-    font-size: 18px; font-weight: bold; color: #1A1A1A; line-height: 1.45;
+    font-family: 'Noto Serif SC', 'WQY', serif;
+    font-size: 18px; font-weight: 600; color: #1A1A1A; line-height: 1.45;
   }
   .sec-divider { height: 1px; background: #E5E5E5; margin-top: 2px; }
   .sec-body {
@@ -277,7 +291,7 @@ function buildCardHTML(entry, qrDataURL) {
   <div class="content">
     <div class="title">${renderWiki(entry.title || '未命名词条')}</div>
     ${entry.subtitle ? `<div class="subtitle">${renderWiki(entry.subtitle)}</div>` : ''}
-    <div class="meta">${catMeta.emoji} ${escHtml(catMeta.label)}  ·  ${scpMeta.emoji} ${escHtml(scpMeta.label)}</div>
+    <div class="meta">${escHtml(catMeta.label)}  ·  ${escHtml(scpMeta.label)}</div>
     <div class="divider"></div>
     ${infoboxBlock}
     ${introBlock}
@@ -339,17 +353,23 @@ async function renderCard(html, port, retries = 2) {
       page = await b.newPage()
       await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
       await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-      // 等图片（成功/失败都算），最多 5 秒；字体已内嵌 base64 无需网络
-      await Promise.race([
-        page.evaluate(() =>
-          Promise.all(
-            Array.from(document.images).map(img =>
-              img.complete ? Promise.resolve() :
-              new Promise(r => { img.onload = r; img.onerror = r })
+      // 字体从 localhost 加载，等待字体 + 图片（各自最多 6 秒）
+      await Promise.all([
+        Promise.race([
+          page.evaluate(() => document.fonts.ready),
+          new Promise(r => setTimeout(r, 6000)),
+        ]),
+        Promise.race([
+          page.evaluate(() =>
+            Promise.all(
+              Array.from(document.images).map(img =>
+                img.complete ? Promise.resolve() :
+                new Promise(r => { img.onload = r; img.onerror = r })
+              )
             )
-          )
-        ),
-        new Promise(r => setTimeout(r, 5000)),
+          ),
+          new Promise(r => setTimeout(r, 5000)),
+        ]),
       ])
       await new Promise(r => setTimeout(r, 200))
       const card = await page.$('.card')
@@ -371,6 +391,11 @@ async function renderCard(html, port, retries = 2) {
 
 const app = express()
 app.use(express.json({ limit: '5mb' }))
+
+// 字体文件静态路由（供 Puppeteer 从 localhost 加载，毫秒级，不走外网）
+app.use('/card-fonts/files', express.static(
+  path.join(__dirname, 'node_modules/@fontsource/noto-serif-sc/files')
+))
 
 app.get('/api/_card/:token', (req, res) => {
   const html = pendingCards.get(req.params.token)
