@@ -34,6 +34,9 @@ export default defineConfig({
       devOptions: { enabled: false },
     })
   ],
+  preview: {
+    allowedHosts: ['lifepedia.a.pinggy.link'],
+  },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') }
   }

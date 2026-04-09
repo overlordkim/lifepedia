@@ -48,6 +48,9 @@ TECH_ROADMAP.md
 pwa/node_modules/
 pwa/dist/
 
+# Server dependencies
+node_modules/
+
 # Scripts output
 scripts/output/
 
