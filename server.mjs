@@ -124,8 +124,6 @@ function buildCardHTML(entry, qrDataURL) {
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   ${fontBase64 ? `@font-face {
     font-family: 'WQY';
@@ -135,7 +133,7 @@ function buildCardHTML(entry, qrDataURL) {
   }` : ''}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Noto Sans SC', ${fontBase64 ? "'WQY'," : ''} -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: ${fontBase64 ? "'WQY'," : ''} -apple-system, BlinkMacSystemFont, sans-serif;
     background: #fff;
     width: 375px;
   }
@@ -164,8 +162,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .content { padding: 20px 16px 0; }
   .title {
-    font-family: 'Noto Serif SC', Georgia, "Times New Roman", serif;
-    font-size: 24px; font-weight: 700; color: #1A1A1A; line-height: 1.35;
+    font-family: 'WQY', Georgia, serif;
+    font-size: 24px; font-weight: bold; color: #1A1A1A; line-height: 1.35;
   }
   .subtitle {
     font-size: 14px; color: #666; margin-top: 4px; line-height: 1.45;
@@ -211,8 +209,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .section { margin-top: 24px; }
   .sec-title {
-    font-family: 'Noto Serif SC', Georgia, "Times New Roman", serif;
-    font-size: 18px; font-weight: 600; color: #1A1A1A; line-height: 1.45;
+    font-family: 'WQY', Georgia, serif;
+    font-size: 18px; font-weight: bold; color: #1A1A1A; line-height: 1.45;
   }
   .sec-divider { height: 1px; background: #E5E5E5; margin-top: 2px; }
   .sec-body {
@@ -247,7 +245,7 @@ function buildCardHTML(entry, qrDataURL) {
     display: flex; align-items: baseline; gap: 5px;
   }
   .footer-brand-en {
-    font-family: 'Noto Serif SC', Georgia, "Times New Roman", serif;
+    font-family: Georgia, serif;
     font-size: 16px; font-weight: bold; font-style: italic; color: #1A1A1A;
   }
   .footer-brand-cn {
@@ -307,6 +305,9 @@ function buildCardHTML(entry, qrDataURL) {
 let browser = null
 const pendingCards = new Map()
 
+// 异步任务队列
+const renderJobs = new Map() // jobId → { status, url?, error? }
+
 async function getBrowser() {
   if (browser && browser.connected) return browser
   if (browser) { try { await browser.close() } catch {} browser = null }
@@ -337,27 +338,20 @@ async function renderCard(html, port, retries = 2) {
       const b = await getBrowser()
       page = await b.newPage()
       await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
-      // domcontentloaded：不等外部图片，避免因图片加载慢/失败而超时
       await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-      // 等字体 + 图片并行加载，各自最多等 8 秒
-      await Promise.race([
-        page.evaluate(() => document.fonts.ready),
-        new Promise(r => setTimeout(r, 8000)),
-      ])
+      // 等图片（成功/失败都算），最多 5 秒；字体已内嵌 base64 无需网络
       await Promise.race([
         page.evaluate(() =>
           Promise.all(
             Array.from(document.images).map(img =>
-              img.complete
-                ? Promise.resolve()
-                : new Promise(r => { img.onload = r; img.onerror = r })
+              img.complete ? Promise.resolve() :
+              new Promise(r => { img.onload = r; img.onerror = r })
             )
           )
         ),
-        new Promise(r => setTimeout(r, 6000)),
+        new Promise(r => setTimeout(r, 5000)),
       ])
-      // 给渲染引擎留 300ms 完成最终绘制
-      await new Promise(r => setTimeout(r, 300))
+      await new Promise(r => setTimeout(r, 200))
       const card = await page.$('.card')
       if (!card) throw new Error('.card element not found')
       const screenshot = await card.screenshot({ type: 'png', omitBackground: false })
@@ -385,29 +379,41 @@ app.get('/api/_card/:token', (req, res) => {
   res.send(html)
 })
 
-app.post('/api/render-share', async (req, res) => {
+// 提交生成任务，立即返回 jobId，后台异步执行
+app.post('/api/render-share', (req, res) => {
   const { entry } = req.body
   if (!entry) return res.status(400).json({ error: 'missing entry' })
-  const token = Math.random().toString(36).slice(2)
-  try {
-    const entryURL = 'https://overlordkim.github.io/lifepedia-redirect/'
-    const qrDataURL = await QRCode.toDataURL(entryURL, {
-      width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
-    })
-    const html = buildCardHTML(entry, qrDataURL)
-    pendingCards.set(token, html)
 
-    const screenshot = await renderCard(html, PORT)
+  const jobId = Math.random().toString(36).slice(2)
+  renderJobs.set(jobId, { status: 'pending' })
+  res.json({ jobId })
 
-    const publicURL = await uploadShareImage(screenshot)
-    res.set('Cache-Control', 'no-store')
-    res.json({ url: publicURL })
-  } catch (err) {
-    console.error('render-share final error:', err)
-    res.status(500).json({ error: err.message })
-  } finally {
-    pendingCards.delete(token)
-  }
+  // 后台执行，不阻塞响应
+  ;(async () => {
+    try {
+      const entryURL = 'https://overlordkim.github.io/lifepedia-redirect/'
+      const qrDataURL = await QRCode.toDataURL(entryURL, {
+        width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
+      })
+      const html = buildCardHTML(entry, qrDataURL)
+      const screenshot = await renderCard(html, PORT)
+      const url = await uploadShareImage(screenshot)
+      renderJobs.set(jobId, { status: 'done', url })
+      console.log('render-share done:', jobId, url)
+    } catch (err) {
+      console.error('render-share error:', jobId, err.message)
+      renderJobs.set(jobId, { status: 'error', error: err.message })
+    }
+    // 10 分钟后自动清理
+    setTimeout(() => renderJobs.delete(jobId), 10 * 60 * 1000)
+  })()
+})
+
+// 查询任务状态
+app.get('/api/render-status/:jobId', (req, res) => {
+  const job = renderJobs.get(req.params.jobId)
+  if (!job) return res.status(404).json({ error: 'job not found' })
+  res.json(job)
 })
 
 app.use(express.static(path.join(__dirname, 'pwa', 'dist'), {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Download, Send, Check, RotateCcw } from 'lucide-react'
 import type { SupabaseEntry } from '../../types'
 
@@ -9,47 +9,69 @@ export default function ShareImageSheet({ entry, onClose }: Props) {
   const [rendering, setRendering] = useState(true)
   const [error, setError] = useState(false)
   const [saved, setSaved] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef = useRef(false)
 
   const renderImage = useCallback(async () => {
     setRendering(true)
     setError(false)
     setImageURL(null)
+    abortRef.current = false
+
     try {
-      // 服务器生成图片后上传到 Supabase，返回 CDN URL（小 JSON，不走大文件传输）
-      // 超时设 60s：服务器内部有 2 次重试，整体耗时可能到 40-50s
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 60000)
-      let res: Response
-      try {
-        res = await fetch('/api/render-share', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entry }),
-          signal: controller.signal,
-        })
-      } finally {
-        clearTimeout(timer)
+      // 提交任务，立即返回 jobId
+      const res = await fetch('/api/render-share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry }),
+      })
+      if (!res.ok) throw new Error(`submit failed: ${res.status}`)
+      const { jobId } = await res.json()
+      if (!jobId) throw new Error('no jobId')
+
+      // 每 2 秒轮询一次，最多等 90 秒
+      const deadline = Date.now() + 90000
+      const poll = async () => {
+        if (abortRef.current) return
+        if (Date.now() > deadline) { setError(true); setRendering(false); return }
+        try {
+          const sr = await fetch(`/api/render-status/${jobId}`)
+          if (!sr.ok) throw new Error(`status ${sr.status}`)
+          const job = await sr.json()
+          if (job.status === 'done' && job.url) {
+            setImageURL(job.url)
+            setRendering(false)
+          } else if (job.status === 'error') {
+            throw new Error(job.error || 'render error')
+          } else {
+            // still pending
+            pollRef.current = setTimeout(poll, 2000)
+          }
+        } catch (err) {
+          console.error('poll error:', err)
+          setError(true)
+          setRendering(false)
+        }
       }
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        throw new Error(`${res.status}: ${body}`)
-      }
-      const { url } = await res.json()
-      if (!url) throw new Error('no url returned')
-      setImageURL(url)
+      pollRef.current = setTimeout(poll, 2000)
     } catch (err) {
-      console.error('render-share client error:', err)
+      console.error('render-share submit error:', err)
       setError(true)
+      setRendering(false)
     }
-    setRendering(false)
   }, [entry])
 
-  useEffect(() => { renderImage() }, [renderImage])
+  useEffect(() => {
+    renderImage()
+    return () => {
+      abortRef.current = true
+      if (pollRef.current) clearTimeout(pollRef.current)
+    }
+  }, [renderImage])
 
   async function handleDownload() {
     if (!imageURL) return
     try {
-      // 直接从 Supabase CDN 下载，不走 Pinggy
       const res = await fetch(imageURL)
       const blob = await res.blob()
       const a = document.createElement('a')
@@ -60,7 +82,6 @@ export default function ShareImageSheet({ entry, onClose }: Props) {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch {
-      // 兜底：直接打开 URL
       window.open(imageURL, '_blank')
     }
   }
@@ -93,12 +114,13 @@ export default function ShareImageSheet({ entry, onClose }: Props) {
         {rendering ? (
           <div className="flex flex-col items-center justify-center h-64 gap-4">
             <span className="w-8 h-8 border-2 border-wiki-border border-t-wiki-blue rounded-full animate-spin" />
-            <span className="text-[14px] text-wiki-secondary">正在生成长图…</span>
+            <span className="text-[14px] text-wiki-secondary">正在生成长图，请稍候…</span>
+            <span className="text-[12px] text-wiki-tertiary">通常需要 10–20 秒</span>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center h-64 gap-3 text-wiki-secondary">
             <span className="text-3xl">⚠</span>
-            <span className="text-[14px]">生成失败</span>
+            <span className="text-[14px]">生成失败，请重试</span>
             <button onClick={renderImage}
               className="flex items-center gap-1.5 mt-2 px-4 py-2 rounded-lg bg-black text-white text-[13px]">
               <RotateCcw size={14} />重试
