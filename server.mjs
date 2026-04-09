@@ -120,7 +120,7 @@ function buildCardHTML(entry, qrDataURL) {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background: #fff;
     width: 375px;
   }
@@ -149,8 +149,9 @@ function buildCardHTML(entry, qrDataURL) {
 
   .content { padding: 20px 16px 0; }
   .title {
-    font-family: Georgia, "Times New Roman", serif;
+    font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", Georgia, "Times New Roman", serif;
     font-size: 24px; font-weight: bold; color: #1A1A1A; line-height: 1.35;
+    letter-spacing: 0.2px;
   }
   .subtitle {
     font-size: 14px; color: #666; margin-top: 4px; line-height: 1.45;
@@ -196,8 +197,9 @@ function buildCardHTML(entry, qrDataURL) {
 
   .section { margin-top: 24px; }
   .sec-title {
-    font-family: Georgia, "Times New Roman", serif;
+    font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", Georgia, "Times New Roman", serif;
     font-size: 18px; font-weight: bold; color: #1A1A1A; line-height: 1.45;
+    letter-spacing: 0.15px;
   }
   .sec-divider { height: 1px; background: #E5E5E5; margin-top: 2px; }
   .sec-body {
@@ -232,7 +234,7 @@ function buildCardHTML(entry, qrDataURL) {
     display: flex; align-items: baseline; gap: 5px;
   }
   .footer-brand-en {
-    font-family: Georgia, serif;
+    font-family: "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
     font-size: 16px; font-weight: bold; font-style: italic; color: #1A1A1A;
   }
   .footer-brand-cn {
