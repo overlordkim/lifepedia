@@ -1,5 +1,16 @@
 # 人间词条 Lifepedia — 部署指南
 
+## ⚡ 快速开始（服务器上 git pull 之后）
+
+`pwa/dist/`（构建产物）和 `node_modules/` **不在 git 仓库里**，每次在新机器部署都必须先构建。
+
+```bash
+git pull
+bash deploy.sh   # 一键完成安装依赖 + 构建前端 + 启动服务器
+```
+
+---
+
 ## 一、项目结构
 
 ```
