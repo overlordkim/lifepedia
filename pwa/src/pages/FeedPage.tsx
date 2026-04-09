@@ -17,12 +17,20 @@ const SEARCH_MODES: { key: SearchMode; label: string }[] = [
   { key: 'users', label: '用户' },
 ]
 const PAGE_SIZE = 12
+const INITIAL_PREFETCH_PAGES = 4
 
 // 用 entry.id + seed 生成稳定随机排序，每次 session 种子不同
 function seededHash(s: string, seed: number): number {
-  let h = seed
-  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0
-  return h >>> 0
+  // FNV-1a + xorshift 混合，降低“固定几条总在前面”的概率
+  let h = (2166136261 ^ seed) >>> 0
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619) >>> 0
+  }
+  h ^= h << 13; h >>>= 0
+  h ^= h >>> 17; h >>>= 0
+  h ^= h << 5; h >>>= 0
+  return h
 }
 
 const PULL_THRESHOLD = 64  // px，下拉多少触发刷新
@@ -65,10 +73,23 @@ export default function FeedPage() {
 
   // 加载第一页（或刷新时重置）
   const loadFirstPage = useCallback(async () => {
-    const rows = await fetchPublishedEntriesPage(0, PAGE_SIZE)
-    setEntryPool(rows)
-    setOffset(PAGE_SIZE)
-    setHasMore(rows.length === PAGE_SIZE)
+    // 首屏预取 4 页，显著降低“总是固定几条在前面”的观感
+    let merged: SupabaseEntry[] = []
+    let nextOffset = 0
+    let more = true
+    for (let i = 0; i < INITIAL_PREFETCH_PAGES; i++) {
+      const rows = await fetchPublishedEntriesPage(nextOffset, PAGE_SIZE)
+      const ids = new Set(merged.map(e => e.id))
+      merged = [...merged, ...rows.filter(r => !ids.has(r.id))]
+      nextOffset += PAGE_SIZE
+      if (rows.length < PAGE_SIZE) {
+        more = false
+        break
+      }
+    }
+    setEntryPool(merged)
+    setOffset(nextOffset)
+    setHasMore(more)
   }, [])
 
   // 初始加载
@@ -90,19 +111,21 @@ export default function FeedPage() {
     if (!touchStartY.current || refreshing) return
     const dy = e.touches[0].clientY - touchStartY.current
     if (dy > 0 && scrollRef.current?.scrollTop === 0) {
+      e.preventDefault()
       // 阻尼效果：拉得越多，增量越小
-      setPullY(Math.min(dy * 0.45, PULL_THRESHOLD + 16))
+      setPullY(Math.min(dy * 0.5, PULL_THRESHOLD + 24))
     }
   }, [refreshing])
 
   const handleTouchEnd = useCallback(async () => {
     if (pullY >= PULL_THRESHOLD && !refreshing) {
       setRefreshing(true)
-      setPullY(0)
+      setPullY(PULL_THRESHOLD)
       try {
         setShuffleSeed(Math.floor(Math.random() * 1e9))  // 新种子 → 新顺序
         await loadFirstPage()
       } finally {
+        setPullY(0)
         setRefreshing(false)
       }
     } else {
