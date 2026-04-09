@@ -382,20 +382,8 @@ async function renderCard(html, port, retries = 2) {
 
 const app = express()
 
-// 手动解析 JSON body（绕开 Express 5 express.json() 卡死问题）
-app.use((req, res, next) => {
-  if (req.method === 'GET' || req.method === 'HEAD') return next()
-  const ct = req.headers['content-type'] || ''
-  if (!ct.includes('application/json')) return next()
-  let raw = ''
-  req.setEncoding('utf8')
-  req.on('data', chunk => { raw += chunk })
-  req.on('end', () => {
-    try { req.body = JSON.parse(raw) } catch { req.body = {} }
-    next()
-  })
-  req.on('error', () => { req.body = {}; next() })
-})
+// 稳定 JSON 请求体解析：先按文本收，再在路由内 JSON.parse
+app.use(express.text({ type: 'application/json', limit: '5mb' }))
 
 app.get('/api/_card/:token', (req, res) => {
   const html = pendingCards.get(req.params.token)
@@ -406,7 +394,15 @@ app.get('/api/_card/:token', (req, res) => {
 
 // 提交生成任务，立即返回 jobId，后台异步执行
 app.post('/api/render-share', (req, res) => {
-  const { entry } = req.body
+  let body = {}
+  if (typeof req.body === 'string' && req.body.length) {
+    try {
+      body = JSON.parse(req.body)
+    } catch {
+      return res.status(400).json({ error: 'invalid json body' })
+    }
+  }
+  const { entry } = body
   if (!entry) return res.status(400).json({ error: 'missing entry' })
 
   const jobId = Math.random().toString(36).slice(2)
