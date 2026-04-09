@@ -306,9 +306,6 @@ function buildCardHTML(entry, qrDataURL) {
 let browser = null
 const pendingCards = new Map()
 
-// 异步任务队列
-const renderJobs = new Map() // jobId → { status, url?, error? }
-
 async function getBrowser() {
   if (browser && browser.connected) return browser
   if (browser) { try { await browser.close() } catch {} browser = null }
@@ -382,9 +379,6 @@ async function renderCard(html, port, retries = 2) {
 
 const app = express()
 
-// 稳定 JSON 请求体解析：先按文本收，再在路由内 JSON.parse
-app.use(express.text({ type: 'application/json', limit: '5mb' }))
-
 app.get('/api/_card/:token', (req, res) => {
   const html = pendingCards.get(req.params.token)
   if (!html) return res.status(404).send('expired')
@@ -392,54 +386,25 @@ app.get('/api/_card/:token', (req, res) => {
   res.send(html)
 })
 
-// 提交生成任务，立即返回 jobId，后台异步执行
-app.post('/api/render-share', (req, res) => {
-  let body = {}
-  if (typeof req.body === 'string' && req.body.length) {
-    try {
-      body = JSON.parse(req.body)
-    } catch {
-      return res.status(400).json({ error: 'invalid json body' })
-    }
-  }
-  const { entry } = body
+// 直接生成并返回 URL（同步简化版）
+app.post('/api/render-share', express.json({ limit: '5mb' }), async (req, res) => {
+  const { entry } = req.body || {}
   if (!entry) return res.status(400).json({ error: 'missing entry' })
-
-  const jobId = Math.random().toString(36).slice(2)
-  renderJobs.set(jobId, { status: 'pending' })
-  res.json({ jobId })
-
-  // 后台执行，不阻塞响应
-  ;(async () => {
-    const t0 = Date.now()
-    const elapsed = () => `+${((Date.now() - t0) / 1000).toFixed(1)}s`
-    console.log(`[${jobId}] 开始生成`)
-    try {
-      const entryURL = 'https://overlordkim.github.io/lifepedia-redirect/'
-      const qrDataURL = await QRCode.toDataURL(entryURL, {
-        width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
-      })
-      console.log(`[${jobId}] QR 生成完 ${elapsed()}`)
-      const html = buildCardHTML(entry, qrDataURL)
-      console.log(`[${jobId}] HTML 生成完 ${elapsed()}`)
-      const screenshot = await renderCard(html, PORT)
-      console.log(`[${jobId}] 截图完 ${elapsed()} (${Math.round(screenshot.length/1024)}KB)`)
-      const url = await uploadShareImage(screenshot)
-      console.log(`[${jobId}] 上传完 ${elapsed()} → ${url}`)
-      renderJobs.set(jobId, { status: 'done', url })
-    } catch (err) {
-      console.error(`[${jobId}] 失败 ${elapsed()} →`, err.message)
-      renderJobs.set(jobId, { status: 'error', error: err.message })
-    }
-    setTimeout(() => renderJobs.delete(jobId), 10 * 60 * 1000)
-  })()
-})
-
-// 查询任务状态
-app.get('/api/render-status/:jobId', (req, res) => {
-  const job = renderJobs.get(req.params.jobId)
-  if (!job) return res.status(404).json({ error: 'job not found' })
-  res.json(job)
+  const t0 = Date.now()
+  try {
+    const entryURL = 'https://overlordkim.github.io/lifepedia-redirect/'
+    const qrDataURL = await QRCode.toDataURL(entryURL, {
+      width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
+    })
+    const html = buildCardHTML(entry, qrDataURL)
+    const screenshot = await renderCard(html, PORT)
+    const url = await uploadShareImage(screenshot)
+    console.log(`[render-share] done in ${Date.now() - t0}ms`)
+    return res.json({ url })
+  } catch (err) {
+    console.error('[render-share] failed:', err?.message || err)
+    return res.status(500).json({ error: err?.message || 'render failed' })
+  }
 })
 
 app.use(express.static(path.join(__dirname, 'pwa', 'dist'), {
