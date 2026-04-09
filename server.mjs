@@ -48,18 +48,6 @@ const fontBase64 = (() => {
   return ''
 })()
 
-// Noto Serif SC 字体 CSS（从 node_modules 读取，URL 替换为本地服务器路径）
-const serifFontCSS = (() => {
-  const cssPath = path.join(__dirname, 'node_modules/@fontsource/noto-serif-sc/700.css')
-  const css400Path = path.join(__dirname, 'node_modules/@fontsource/noto-serif-sc/400.css')
-  const base = `http://127.0.0.1:${PORT}/card-fonts/files/`
-  let css = ''
-  if (fs.existsSync(cssPath))
-    css += fs.readFileSync(cssPath, 'utf-8').replace(/url\(\.\/files\//g, `url(${base}`)
-  if (fs.existsSync(css400Path))
-    css += fs.readFileSync(css400Path, 'utf-8').replace(/url\(\.\/files\//g, `url(${base}`)
-  return css
-})()
 
 const CATEGORY_META = {
   person:    { label: '人物' },
@@ -138,7 +126,6 @@ function buildCardHTML(entry, qrDataURL) {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
-  ${serifFontCSS}
   ${fontBase64 ? `@font-face {
     font-family: 'WQY';
     src: url('${fontBase64}') format('truetype');
@@ -147,7 +134,7 @@ function buildCardHTML(entry, qrDataURL) {
   }` : ''}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Noto Serif SC', ${fontBase64 ? "'WQY'," : ''} sans-serif;
+    font-family: ${fontBase64 ? "'WQY'," : ''} sans-serif;
     background: #fff;
     width: 375px;
   }
@@ -176,8 +163,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .content { padding: 20px 16px 0; }
   .title {
-    font-family: 'Noto Serif SC', 'WQY', serif;
-    font-size: 24px; font-weight: 700; color: #1A1A1A; line-height: 1.35;
+    font-family: 'WQY', serif;
+    font-size: 24px; font-weight: bold; color: #1A1A1A; line-height: 1.35;
   }
   .subtitle {
     font-size: 14px; color: #666; margin-top: 4px; line-height: 1.45;
@@ -223,8 +210,8 @@ function buildCardHTML(entry, qrDataURL) {
 
   .section { margin-top: 24px; }
   .sec-title {
-    font-family: 'Noto Serif SC', 'WQY', serif;
-    font-size: 18px; font-weight: 600; color: #1A1A1A; line-height: 1.45;
+    font-family: 'WQY', serif;
+    font-size: 18px; font-weight: bold; color: #1A1A1A; line-height: 1.45;
   }
   .sec-divider { height: 1px; background: #E5E5E5; margin-top: 2px; }
   .sec-body {
@@ -394,12 +381,21 @@ async function renderCard(html, port, retries = 2) {
 }
 
 const app = express()
-app.use(express.json({ limit: '5mb' }))
 
-// 字体文件静态路由（供 Puppeteer 从 localhost 加载，毫秒级，不走外网）
-app.use('/card-fonts/files', express.static(
-  path.join(__dirname, 'node_modules/@fontsource/noto-serif-sc/files')
-))
+// 手动解析 JSON body（绕开 Express 5 express.json() 卡死问题）
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD') return next()
+  const ct = req.headers['content-type'] || ''
+  if (!ct.includes('application/json')) return next()
+  let raw = ''
+  req.setEncoding('utf8')
+  req.on('data', chunk => { raw += chunk })
+  req.on('end', () => {
+    try { req.body = JSON.parse(raw) } catch { req.body = {} }
+    next()
+  })
+  req.on('error', () => { req.body = {}; next() })
+})
 
 app.get('/api/_card/:token', (req, res) => {
   const html = pendingCards.get(req.params.token)
