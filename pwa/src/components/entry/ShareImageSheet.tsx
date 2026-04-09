@@ -15,17 +15,30 @@ export default function ShareImageSheet({ entry, onClose }: Props) {
     setError(false)
     setImageURL(null)
     try {
-      // Step 1: 让服务器生成图片并上传到 Supabase，返回 URL（小 JSON，不走大文件传输）
-      const res = await fetch('/api/render-share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entry }),
-      })
-      if (!res.ok) throw new Error(`${res.status}`)
+      // 服务器生成图片后上传到 Supabase，返回 CDN URL（小 JSON，不走大文件传输）
+      // 超时设 60s：服务器内部有 2 次重试，整体耗时可能到 40-50s
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 60000)
+      let res: Response
+      try {
+        res = await fetch('/api/render-share', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry }),
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        throw new Error(`${res.status}: ${body}`)
+      }
       const { url } = await res.json()
-      if (!url) throw new Error('no url')
+      if (!url) throw new Error('no url returned')
       setImageURL(url)
-    } catch {
+    } catch (err) {
+      console.error('render-share client error:', err)
       setError(true)
     }
     setRendering(false)

@@ -288,20 +288,72 @@ function buildCardHTML(entry, qrDataURL) {
 </body></html>`
 }
 
+// Puppeteer 浏览器实例（进程级复用，断线自动重建）
 let browser = null
 const pendingCards = new Map()
 
 async function getBrowser() {
   if (browser && browser.connected) return browser
-  if (browser) {
-    try { await browser.close() } catch {}
-  }
+  if (browser) { try { await browser.close() } catch {} browser = null }
   browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+    ],
   })
   browser.on('disconnected', () => { browser = null })
   return browser
+}
+
+// 带自动重试的截图函数
+async function renderCard(html, port, retries = 2) {
+  const token = Math.random().toString(36).slice(2)
+  pendingCards.set(token, html)
+  const cardUrl = `http://127.0.0.1:${port}/api/_card/${token}`
+  let lastErr
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    let page
+    try {
+      const b = await getBrowser()
+      page = await b.newPage()
+      await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
+      // domcontentloaded：不等外部图片，避免因图片加载慢/失败而超时
+      await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      // 等图片（成功或失败都结束），最多等 6 秒
+      await Promise.race([
+        page.evaluate(() =>
+          Promise.all(
+            Array.from(document.images).map(img =>
+              img.complete
+                ? Promise.resolve()
+                : new Promise(r => { img.onload = r; img.onerror = r })
+            )
+          )
+        ),
+        new Promise(r => setTimeout(r, 6000)),
+      ])
+      // 给渲染引擎留 300ms 完成最终绘制
+      await new Promise(r => setTimeout(r, 300))
+      const card = await page.$('.card')
+      if (!card) throw new Error('.card element not found')
+      const screenshot = await card.screenshot({ type: 'png', omitBackground: false })
+      await page.close().catch(() => {})
+      return screenshot
+    } catch (err) {
+      lastErr = err
+      console.error(`render attempt ${attempt + 1} failed:`, err.message)
+      if (page) await page.close().catch(() => {})
+      // 浏览器崩溃时强制重建
+      if (browser && !browser.connected) { try { await browser.close() } catch {} browser = null }
+      if (attempt < retries) await new Promise(r => setTimeout(r, 1200 * (attempt + 1)))
+    }
+  }
+  throw lastErr
 }
 
 const app = express()
@@ -317,9 +369,7 @@ app.get('/api/_card/:token', (req, res) => {
 app.post('/api/render-share', async (req, res) => {
   const { entry } = req.body
   if (!entry) return res.status(400).json({ error: 'missing entry' })
-
   const token = Math.random().toString(36).slice(2)
-  let page
   try {
     const entryURL = 'https://overlordkim.github.io/lifepedia-redirect/'
     const qrDataURL = await QRCode.toDataURL(entryURL, {
@@ -328,37 +378,16 @@ app.post('/api/render-share', async (req, res) => {
     const html = buildCardHTML(entry, qrDataURL)
     pendingCards.set(token, html)
 
-    const b = await getBrowser()
-    page = await b.newPage()
-    await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
+    const screenshot = await renderCard(html, PORT)
 
-    page.on('requestfailed', r =>
-      console.log('  [img fail]', r.url().slice(0, 80), r.failure()?.errorText)
-    )
-
-    const cardUrl = `http://127.0.0.1:${PORT}/api/_card/${token}`
-    await page.goto(cardUrl, { waitUntil: 'networkidle0', timeout: 30000 })
-
-    await page.evaluate(() =>
-      Promise.all(Array.from(document.images).map(img =>
-        img.complete ? Promise.resolve() :
-        new Promise(r => { img.onload = r; img.onerror = r })
-      ))
-    )
-
-    const card = await page.$('.card')
-    const screenshot = await card.screenshot({ type: 'png', omitBackground: false })
-
-    // 上传到 Supabase Storage，客户端直接从 CDN 下载，绕开 Pinggy 隧道大文件传输
     const publicURL = await uploadShareImage(screenshot)
     res.set('Cache-Control', 'no-store')
     res.json({ url: publicURL })
   } catch (err) {
-    console.error('render-share error:', err)
+    console.error('render-share final error:', err)
     res.status(500).json({ error: err.message })
   } finally {
     pendingCards.delete(token)
-    if (page) await page.close().catch(() => {})
   }
 })
 
