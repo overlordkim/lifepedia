@@ -290,7 +290,6 @@ function buildCardHTML(entry, qrDataURL) {
 
 // Puppeteer 浏览器实例（进程级复用，断线自动重建）
 let browser = null
-const pendingCards = new Map()
 
 async function getBrowser() {
   if (browser && browser.connected) return browser
@@ -311,10 +310,7 @@ async function getBrowser() {
 }
 
 // 带自动重试的截图函数
-async function renderCard(html, port, retries = 2) {
-  const token = Math.random().toString(36).slice(2)
-  pendingCards.set(token, html)
-  const cardUrl = `http://127.0.0.1:${port}/api/_card/${token}`
+async function renderCard(html, retries = 2) {
   let lastErr
   for (let attempt = 0; attempt <= retries; attempt++) {
     const t = Date.now()
@@ -325,8 +321,9 @@ async function renderCard(html, port, retries = 2) {
       console.log(`  [render#${attempt+1}] getBrowser ${ms()}`)
       page = await b.newPage()
       await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
-      await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
-      console.log(`  [render#${attempt+1}] goto ${ms()}`)
+      // 直接注入 HTML，避免走 /api/_card HTTP 导航引发 timeout
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 45000 })
+      console.log(`  [render#${attempt+1}] setContent ${ms()}`)
       await Promise.all([
         Promise.race([
           page.evaluate(() => document.fonts.ready),
@@ -365,13 +362,6 @@ async function renderCard(html, port, retries = 2) {
 
 const app = express()
 
-app.get('/api/_card/:token', (req, res) => {
-  const html = pendingCards.get(req.params.token)
-  if (!html) return res.status(404).send('expired')
-  res.set('Content-Type', 'text/html; charset=utf-8')
-  res.send(html)
-})
-
 // 直接生成并返回 URL（同步简化版）
 app.post('/api/render-share', express.json({ limit: '5mb' }), async (req, res) => {
   const { entry } = req.body || {}
@@ -383,7 +373,7 @@ app.post('/api/render-share', express.json({ limit: '5mb' }), async (req, res) =
       width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
     })
     const html = buildCardHTML(entry, qrDataURL)
-    const screenshot = await renderCard(html, PORT)
+    const screenshot = await renderCard(html)
     const url = await uploadShareImage(screenshot)
     console.log(`[render-share] done in ${Date.now() - t0}ms`)
     return res.json({ url })
