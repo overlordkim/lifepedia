@@ -120,7 +120,7 @@ function buildCardHTML(entry, qrDataURL) {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
     background: #fff;
     width: 375px;
   }
@@ -135,9 +135,11 @@ function buildCardHTML(entry, qrDataURL) {
     width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
     background: #F5F5F5; flex-shrink: 0;
   }
-  .topbar-name { font-size: 14px; font-weight: 600; color: #1A1A1A; margin-left: 8px; }
+  .topbar-name {
+    font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+    font-size: 14px; font-weight: 600; color: #1A1A1A; margin-left: 8px;
+  }
   .topbar-spacer { flex: 1; }
-  .topbar-dots { font-size: 18px; font-weight: 300; color: #1A1A1A; letter-spacing: 2px; }
 
   .cover img { width: 100%; display: block; }
   .cover-placeholder {
@@ -238,6 +240,7 @@ function buildCardHTML(entry, qrDataURL) {
     font-size: 16px; font-weight: bold; font-style: italic; color: #1A1A1A;
   }
   .footer-brand-cn {
+    font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
     font-size: 13px; font-weight: 600; color: #1A1A1A;
   }
   .footer-slogan {
@@ -260,7 +263,6 @@ function buildCardHTML(entry, qrDataURL) {
     <img class="topbar-avatar" src="${escHtml(avUrl)}" onerror="this.style.display='none'" />
     <span class="topbar-name">${escHtml(entry.author_name)}</span>
     <span class="topbar-spacer"></span>
-    <span class="topbar-dots">•••</span>
   </div>
   ${coverBlock}
   <div class="content">
