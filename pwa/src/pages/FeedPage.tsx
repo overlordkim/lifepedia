@@ -18,12 +18,22 @@ const SEARCH_MODES: { key: SearchMode; label: string }[] = [
 ]
 const PAGE_SIZE = 12
 
+// 用 entry.id + seed 生成稳定随机排序，每次 session 种子不同
+function seededHash(s: string, seed: number): number {
+  let h = seed
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0
+  return h >>> 0
+}
+
 export default function FeedPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
 
+  // session 级随机种子：每次打开页面重新生成，刷新后顺序不同
+  const [shuffleSeed] = useState(() => Math.floor(Math.random() * 1e9))
+
   // ── 分页加载 ──
-  const [entries, setEntries] = useState<SupabaseEntry[]>([])
+  const [entryPool, setEntryPool] = useState<SupabaseEntry[]>([])  // 原始拉取池
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -49,7 +59,7 @@ export default function FeedPage() {
   useEffect(() => {
     fetchPublishedEntriesPage(0, PAGE_SIZE)
       .then(rows => {
-        setEntries(rows)
+        setEntryPool(rows)
         setOffset(PAGE_SIZE)
         setHasMore(rows.length === PAGE_SIZE)
       })
@@ -64,7 +74,7 @@ export default function FeedPage() {
     setLoadingMore(true)
     try {
       const rows = await fetchPublishedEntriesPage(offset, PAGE_SIZE)
-      setEntries(prev => {
+      setEntryPool(prev => {
         const ids = new Set(prev.map(e => e.id))
         return [...prev, ...rows.filter(r => !ids.has(r.id))]
       })
@@ -101,9 +111,11 @@ export default function FeedPage() {
     }, 400)
   }, [searchText])
 
-  // 当前显示的词条列表
+  // 当前显示的词条列表（非搜索时用 seed 随机排序）
   const isSearching = !!searchText.trim()
-  let displayEntries = isSearching ? searchResults : entries
+  let displayEntries = isSearching
+    ? searchResults
+    : [...entryPool].sort((a, b) => seededHash(a.id, shuffleSeed) - seededHash(b.id, shuffleSeed))
   if (selectedCat) displayEntries = displayEntries.filter(e => e.category === selectedCat)
 
   // 搜索到的用户（从搜索结果里聚合）
