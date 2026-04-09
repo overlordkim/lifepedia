@@ -20,8 +20,8 @@ if command -v apt-get &>/dev/null; then
     (cd /tmp && sudo apt-get download libasound2-data alsa-topology-conf libasound2t64 2>/dev/null && \
      sudo dpkg -i --force-depends libasound2-data_*.deb alsa-topology-conf_*.deb libasound2t64_*.deb 2>/dev/null) || true
   fi
-  # 中文字体（避免 Chromium 截图中文显示为方块）
-  sudo apt-get install -y --fix-missing fonts-noto-cjk 2>/dev/null || true
+  # 中文字体（避免 Chromium 截图中文显示为方块，wqy 比 noto-cjk 小很多）
+  sudo apt-get install -y --fix-missing fonts-wqy-zenhei fonts-wqy-microhei 2>/dev/null || true
   fc-cache -f 2>/dev/null || true
 else
   echo "  非 apt 系统，跳过系统依赖安装"
