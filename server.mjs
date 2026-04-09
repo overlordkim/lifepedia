@@ -41,14 +41,6 @@ const logoBase64 = (() => {
   return ''
 })()
 
-// WQY 内嵌兜底字体（保证中文不乱码）
-const fontBase64 = (() => {
-  const p = path.join(__dirname, 'fonts', 'wqy-microhei.ttc')
-  if (fs.existsSync(p)) return 'data:font/ttc;base64,' + fs.readFileSync(p).toString('base64')
-  return ''
-})()
-
-
 const CATEGORY_META = {
   person:    { label: '人物' },
   place:     { label: '栖居' },
@@ -126,15 +118,9 @@ function buildCardHTML(entry, qrDataURL) {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
-  ${fontBase64 ? `@font-face {
-    font-family: 'WQY';
-    src: url('${fontBase64}') format('truetype');
-    font-weight: normal;
-    font-style: normal;
-  }` : ''}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: ${fontBase64 ? "'WQY'," : ''} sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background: #fff;
     width: 375px;
   }
@@ -163,7 +149,7 @@ function buildCardHTML(entry, qrDataURL) {
 
   .content { padding: 20px 16px 0; }
   .title {
-    font-family: 'WQY', serif;
+    font-family: Georgia, "Times New Roman", serif;
     font-size: 24px; font-weight: bold; color: #1A1A1A; line-height: 1.35;
   }
   .subtitle {
@@ -210,7 +196,7 @@ function buildCardHTML(entry, qrDataURL) {
 
   .section { margin-top: 24px; }
   .sec-title {
-    font-family: 'WQY', serif;
+    font-family: Georgia, "Times New Roman", serif;
     font-size: 18px; font-weight: bold; color: #1A1A1A; line-height: 1.45;
   }
   .sec-divider { height: 1px; background: #E5E5E5; margin-top: 2px; }
@@ -339,7 +325,7 @@ async function renderCard(html, port, retries = 2) {
       console.log(`  [render#${attempt+1}] getBrowser ${ms()}`)
       page = await b.newPage()
       await page.setViewport({ width: 375, height: 800, deviceScaleFactor: 3 })
-      await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+      await page.goto(cardUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
       console.log(`  [render#${attempt+1}] goto ${ms()}`)
       await Promise.all([
         Promise.race([
