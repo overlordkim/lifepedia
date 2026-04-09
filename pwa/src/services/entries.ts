@@ -6,6 +6,19 @@ export async function fetchPublishedEntries(): Promise<SupabaseEntry[]> {
   return supabaseGet<SupabaseEntry[]>('entries?status=eq.published&order=created_at.desc&limit=200')
 }
 
+export async function fetchPublishedEntriesPage(offset: number, limit = 12): Promise<SupabaseEntry[]> {
+  return supabaseGet<SupabaseEntry[]>(
+    `entries?status=eq.published&order=created_at.desc&limit=${limit}&offset=${offset}`
+  )
+}
+
+export async function searchEntries(q: string): Promise<SupabaseEntry[]> {
+  const enc = encodeURIComponent(q)
+  return supabaseGet<SupabaseEntry[]>(
+    `entries?status=eq.published&or=(title.ilike.*${enc}*,introduction.ilike.*${enc}*,author_name.ilike.*${enc}*)&order=created_at.desc&limit=50`
+  )
+}
+
 export async function fetchEntryById(id: string): Promise<SupabaseEntry | null> {
   const rows = await supabaseGet<SupabaseEntry[]>(`entries?id=eq.${id}&limit=1`)
   return rows[0] ?? null

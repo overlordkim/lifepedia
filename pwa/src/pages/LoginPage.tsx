@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { BookOpen } from 'lucide-react'
 
 export default function LoginPage() {
   const { login, register } = useAuth()
@@ -36,10 +35,11 @@ export default function LoginPage() {
     <div className="min-h-screen bg-white flex flex-col items-center px-8">
       <div className="h-[16vh]" />
 
-      <div className="flex flex-col items-center gap-3 mb-10">
-        <BookOpen size={48} strokeWidth={1} className="text-wiki-text" />
+      <div className="flex flex-col items-center gap-2 mb-10">
+        <img src="/logo.png" alt="Lifepedia" className="w-[72px] h-[72px] object-contain mb-1" />
         <h1 className="font-serif text-[32px] font-bold text-wiki-text">人间词条</h1>
         <p className="font-serif italic text-wiki-tertiary text-base">Lifepedia</p>
+        <p className="text-[13px] text-wiki-tertiary leading-relaxed text-center mt-2">一切值得铭记之物<br />皆可收录</p>
       </div>
 
       <div className="flex bg-wiki-bg-secondary rounded-lg p-0.5 mb-6 w-full max-w-sm">
@@ -103,16 +103,6 @@ export default function LoginPage() {
           ) : mode === 'login' ? '登录' : '注册'}
         </button>
       </div>
-
-      <p className="mt-6 text-[13px] text-wiki-tertiary">
-        {mode === 'login' ? '还没有账号？' : '已有账号？'}
-        <button
-          onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null) }}
-          className="text-wiki-blue ml-1"
-        >
-          {mode === 'login' ? '立即注册' : '去登录'}
-        </button>
-      </p>
 
       <style>{`
         @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(8px); } 75% { transform: translateX(-8px); } }

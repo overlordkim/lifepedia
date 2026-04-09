@@ -1,5 +1,5 @@
 import { sha256 } from 'js-sha256'
-import { supabaseGet } from '../lib/supabase'
+import { supabaseGet, supabasePost } from '../lib/supabase'
 import type { UserProfile } from '../types'
 
 const STORAGE_KEY = 'auth_user_json'
@@ -51,7 +51,7 @@ export async function register(username: string, password: string): Promise<User
     username,
     password_hash: hash,
     display_name: username,
-    bio: '',
+    bio: '一切值得铭记之物，皆可收录',
     avatar_seed: avatarSeed,
   })
 

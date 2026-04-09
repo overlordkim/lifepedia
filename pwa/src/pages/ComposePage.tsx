@@ -236,7 +236,7 @@ export default function ComposePage() {
           </div>
         ) : (
           <div className="px-4 py-4 space-y-3">
-            {coverURL && <img src={coverURL} alt="" className="w-full aspect-video object-cover rounded-lg" />}
+            {coverURL && <img src={coverURL} alt="" className="w-full rounded-lg" />}
             <h1 className="font-serif text-wiki-title">{entry.title}</h1>
             {entry.introduction && <p className="text-wiki-body wiki-reading">{entry.introduction}</p>}
             {(entry.sections || []).map((sec, i) => (

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { Heart, MessageCircle } from 'lucide-react'
 import { CATEGORY_META, type SupabaseEntry, type EntryCategory } from '../../types'
 import Avatar from '../shared/Avatar'
@@ -16,9 +16,9 @@ export default function FeedCard({ entry, onClick }: Props) {
     || null
 
   const seed = Math.abs(hashCode(entry.title)) % 1000
-  const ratios = [4/3, 3/2, 16/9, 1]
-  const ratio = ratios[seed % ratios.length]
-  const hue = (seed % 360)
+  const fallbackRatios = [4/3, 3/2, 16/9, 1]
+  const fallbackRatio = fallbackRatios[seed % fallbackRatios.length]
+  const hue = seed % 360
 
   const highlights = (entry.infobox || []).slice(0, 3).map(f => f.value).join('  ·  ')
   const catLabel = CATEGORY_META[entry.category as EntryCategory]?.label || entry.category
@@ -28,23 +28,22 @@ export default function FeedCard({ entry, onClick }: Props) {
       onClick={onClick}
       className="bg-white rounded-md shadow-[0_2px_6px_rgba(0,0,0,0.05)] overflow-hidden cursor-pointer active:scale-[0.99] transition-transform"
     >
-      {/* 封面 */}
-      <div className="relative w-full overflow-hidden" style={{ aspectRatio: ratio }}>
-        {coverURL ? (
-          <img src={coverURL} alt="" className="w-full h-full object-cover" loading="lazy" />
-        ) : (
-          <div
-            className="w-full h-full flex items-center justify-center"
-            style={{
-              background: `linear-gradient(135deg, hsl(${hue}, 8%, 97%), hsl(${hue}, 12%, 93%))`,
-            }}
-          >
-            <svg className="w-6 h-6" style={{ color: `hsl(${hue}, 15%, 82%)` }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25a1.5 1.5 0 001.5 1.5z" />
-            </svg>
-          </div>
-        )}
-      </div>
+      {/* 封面：有图片时自然比例，无图时用 hash 占位 */}
+      {coverURL ? (
+        <img src={coverURL} alt="" className="w-full block" loading="lazy" />
+      ) : (
+        <div
+          className="w-full flex items-center justify-center"
+          style={{
+            aspectRatio: fallbackRatio,
+            background: `linear-gradient(135deg, hsl(${hue}, 8%, 97%), hsl(${hue}, 12%, 93%))`,
+          }}
+        >
+          <svg className="w-6 h-6" style={{ color: `hsl(${hue}, 15%, 82%)` }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91M3.75 21h16.5a1.5 1.5 0 001.5-1.5V5.25a1.5 1.5 0 00-1.5-1.5H3.75a1.5 1.5 0 00-1.5 1.5v14.25a1.5 1.5 0 001.5 1.5z" />
+          </svg>
+        </div>
+      )}
 
       {/* 内容 */}
       <div className="px-3 pt-3 pb-2.5">

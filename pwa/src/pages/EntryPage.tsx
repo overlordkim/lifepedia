@@ -690,20 +690,17 @@ function ScopeIcon({ scope, size = 14 }: { scope: EntryScope; size?: number }) {
 
 function HeroImage({ url, title }: { url?: string | null; title: string }) {
   const seed = Math.abs(hashCode(title)) % 1000
-  const ratios = [4/3, 3/2, 16/9, 1]
-  const ratio = ratios[seed % ratios.length]
+  const fallbackRatios = [4/3, 3/2, 16/9, 1]
+  const fallbackRatio = fallbackRatios[seed % fallbackRatios.length]
   const hue = seed % 360
 
   if (url) {
-    return (
-      <div className="w-full overflow-hidden" style={{ aspectRatio: ratio }}>
-        <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
-      </div>
-    )
+    // 有图片：直接渲染，让浏览器自然撑开真实比例，不裁切
+    return <img src={url} alt="" className="w-full block" loading="lazy" />
   }
 
   return (
-    <div className="w-full flex flex-col items-center justify-center" style={{ aspectRatio: ratio, background: `linear-gradient(135deg, hsl(${hue},8%,97%), hsl(${hue},15%,90%))` }}>
+    <div className="w-full flex flex-col items-center justify-center" style={{ aspectRatio: fallbackRatio, background: `linear-gradient(135deg, hsl(${hue},8%,97%), hsl(${hue},15%,90%))` }}>
       <svg className="w-8 h-8 mb-1.5" style={{ color: `hsl(${hue},10%,75%)`, opacity: 0.5 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
       </svg>

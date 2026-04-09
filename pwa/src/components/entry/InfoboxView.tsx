@@ -1,6 +1,7 @@
 import { Tag } from 'lucide-react'
 import type { InfoboxField, EntryCategory } from '../../types'
 import { CATEGORY_META } from '../../types'
+import { parseWikiText } from '../../utils/wiki'
 
 interface Props {
   category: EntryCategory
@@ -27,8 +28,8 @@ export default function InfoboxView({ category, fields }: Props) {
             <span className="w-20 shrink-0 text-right pr-3 text-[12px] font-medium text-wiki-tertiary">
               {f.key}
             </span>
-            <span className="flex-1 text-[13px] text-wiki-text">
-              {f.value}
+            <span className="flex-1 text-[13px] text-wiki-text leading-[1.55]">
+              {parseWikiText(f.value)}
             </span>
           </div>
         </div>

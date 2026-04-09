@@ -9,6 +9,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = parseInt(process.env.PORT || '17497', 10)
 
 const SUPABASE_URL = 'https://okoeauotvsgjwhydfgsk.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rb2VhdW90dnNnandoeWRmZ3NrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2Mzk4OTksImV4cCI6MjA5MTIxNTg5OX0.p5UDU3QJi7OIWOEL8Sp8Ky6Cm_j1bf9v8R1xRbN6Wgo'
+
+async function uploadShareImage(pngBuffer) {
+  const name = `share-${Date.now()}-${Math.random().toString(36).slice(2)}.png`
+  const uploadURL = `${SUPABASE_URL}/storage/v1/object/images/shares/${name}`
+  const res = await fetch(uploadURL, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type': 'image/png',
+      'x-upsert': 'true',
+    },
+    body: pngBuffer,
+  })
+  if (!res.ok) {
+    const msg = await res.text()
+    throw new Error(`Storage upload failed: ${res.status} ${msg}`)
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/images/shares/${name}`
+}
 
 function avatarURL(userId) {
   return `${SUPABASE_URL}/storage/v1/object/public/images/avatars/${userId}.jpg`
@@ -258,7 +279,7 @@ function buildCardHTML(entry, qrDataURL) {
           <span class="footer-brand-en">Lifepedia</span>
           <span class="footer-brand-cn">人间词条</span>
         </div>
-        <div class="footer-slogan">你的生命值得一座百科</div>
+        <div class="footer-slogan">一切值得铭记之物，皆可收录</div>
       </div>
     </div>
     ${qrDataURL ? `<img class="footer-qr" src="${qrDataURL}" />` : ''}
@@ -271,12 +292,15 @@ let browser = null
 const pendingCards = new Map()
 
 async function getBrowser() {
-  if (!browser) {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    })
+  if (browser && browser.connected) return browser
+  if (browser) {
+    try { await browser.close() } catch {}
   }
+  browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  })
+  browser.on('disconnected', () => { browser = null })
   return browser
 }
 
@@ -297,7 +321,7 @@ app.post('/api/render-share', async (req, res) => {
   const token = Math.random().toString(36).slice(2)
   let page
   try {
-    const entryURL = 'https://lifepedia.a.pinggy.link'
+    const entryURL = 'https://overlordkim.github.io/lifepedia-redirect/'
     const qrDataURL = await QRCode.toDataURL(entryURL, {
       width: 256, margin: 1, color: { dark: '#1A1A1A', light: '#FFFFFF' }
     })
@@ -325,9 +349,10 @@ app.post('/api/render-share', async (req, res) => {
     const card = await page.$('.card')
     const screenshot = await card.screenshot({ type: 'png', omitBackground: false })
 
-    res.set('Content-Type', 'image/png')
+    // 上传到 Supabase Storage，客户端直接从 CDN 下载，绕开 Pinggy 隧道大文件传输
+    const publicURL = await uploadShareImage(screenshot)
     res.set('Cache-Control', 'no-store')
-    res.send(screenshot)
+    res.json({ url: publicURL })
   } catch (err) {
     console.error('render-share error:', err)
     res.status(500).json({ error: err.message })
@@ -338,10 +363,8 @@ app.post('/api/render-share', async (req, res) => {
 })
 
 app.use(express.static(path.join(__dirname, 'pwa', 'dist'), {
-  setHeaders(res, filePath) {
-    if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('registerSW.js')) {
-      res.set('Cache-Control', 'no-store')
-    }
+  setHeaders(res) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate')
   }
 }))
 
