@@ -41,6 +41,13 @@ const logoBase64 = (() => {
   return ''
 })()
 
+// 内嵌中文字体，不依赖服务器系统字体
+const fontBase64 = (() => {
+  const p = path.join(__dirname, 'fonts', 'wqy-microhei.ttc')
+  if (fs.existsSync(p)) return 'data:font/ttc;base64,' + fs.readFileSync(p).toString('base64')
+  return ''
+})()
+
 const CATEGORY_META = {
   person:    { label: '人物', emoji: '👤' },
   place:     { label: '栖居', emoji: '🏠' },
@@ -118,9 +125,15 @@ function buildCardHTML(entry, qrDataURL) {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
+  ${fontBase64 ? `@font-face {
+    font-family: 'WQY';
+    src: url('${fontBase64}') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+  }` : ''}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: ${fontBase64 ? "'WQY'," : ''} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background: #fff;
     width: 375px;
   }
