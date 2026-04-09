@@ -19,18 +19,16 @@ const SEARCH_MODES: { key: SearchMode; label: string }[] = [
 const PAGE_SIZE = 12
 const INITIAL_PREFETCH_PAGES = 4
 
-// 用 entry.id + seed 生成稳定随机排序，每次 session 种子不同
-function seededHash(s: string, seed: number): number {
-  // FNV-1a + xorshift 混合，降低“固定几条总在前面”的概率
-  let h = (2166136261 ^ seed) >>> 0
+// 用 entry.id + seed 生成稳定随机分值（0~1），每次 session seed 不同
+function seededScore(s: string, seed: number): number {
+  let h = (0x9e3779b9 ^ seed) >>> 0
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i)
-    h = Math.imul(h, 16777619) >>> 0
+    h = Math.imul(h, 0x85ebca6b) >>> 0
+    h ^= h >>> 13
   }
-  h ^= h << 13; h >>>= 0
-  h ^= h >>> 17; h >>>= 0
-  h ^= h << 5; h >>>= 0
-  return h
+  // 映射到 [0,1)
+  return (h >>> 0) / 0x100000000
 }
 
 const PULL_THRESHOLD = 64  // px，下拉多少触发刷新
@@ -124,6 +122,8 @@ export default function FeedPage() {
       try {
         setShuffleSeed(Math.floor(Math.random() * 1e9))  // 新种子 → 新顺序
         await loadFirstPage()
+        // 至少保留一点刷新反馈，手感更自然
+        await new Promise(r => setTimeout(r, 220))
       } finally {
         setPullY(0)
         setRefreshing(false)
@@ -182,7 +182,7 @@ export default function FeedPage() {
   const displayEntries = useMemo(() => {
     let list = isSearching
       ? searchResults
-      : [...entryPool].sort((a, b) => seededHash(a.id, shuffleSeed) - seededHash(b.id, shuffleSeed))
+      : [...entryPool].sort((a, b) => seededScore(a.id, shuffleSeed) - seededScore(b.id, shuffleSeed))
     if (selectedCat) list = list.filter(e => e.category === selectedCat)
     return list
   }, [isSearching, searchResults, entryPool, shuffleSeed, selectedCat])
@@ -286,6 +286,7 @@ export default function FeedPage() {
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        style={{ overscrollBehaviorY: 'contain' }}
       >
         {/* 下拉刷新指示器 */}
         <div
