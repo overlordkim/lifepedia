@@ -43,3 +43,14 @@ doc.md
 update41.md
 product.md
 TECH_ROADMAP.md
+
+# PWA build output
+pwa/node_modules/
+pwa/dist/
+
+# Scripts output
+scripts/output/
+
+# Test files
+test.jpg
+logo.jpeg
